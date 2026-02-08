@@ -1,0 +1,39 @@
+{
+  "manifest_version": 3,
+  "name": "Grok Imagine Assistant",
+  "version": "1.0.0",
+  "description": "OpenAI-compatible API for automated video generation using Grok Imagine",
+  "permissions": [
+    "storage",
+    "tabs",
+    "scripting",
+    "sidePanel",
+    "downloads"
+  ],
+  "host_permissions": [
+    "https://grok.com/*",
+    "https://assets.grok.com/*",
+    "https://imagine-public.x.ai/*",
+    "http://localhost:*/*",
+    "http://127.0.0.1:*/*"
+  ],
+  "background": {
+    "service_worker": "background/service-worker.js"
+  },
+  "content_scripts": [{
+    "matches": ["https://grok.com/imagine*"],
+    "js": ["content/content.js"],
+    "css": ["content/styles.css"],
+    "run_at": "document_end"
+  }],
+  "action": {
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "side_panel": {
+    "default_path": "popup/popup.html"
+  }
+}

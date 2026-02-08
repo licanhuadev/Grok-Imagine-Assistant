@@ -1,0 +1,650 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Grok Imagine API Dashboard</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #f5f5f5;
+            color: #333;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 2rem;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+
+        .header h1 {
+            font-size: 2rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .header .status {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-size: 0.9rem;
+        }
+
+        .status-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #4CAF50;
+            animation: pulse 2s ease-in-out infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+
+        .tabs {
+            display: flex;
+            gap: 1rem;
+            margin-bottom: 2rem;
+            border-bottom: 2px solid #ddd;
+        }
+
+        .tab {
+            padding: 1rem 2rem;
+            background: none;
+            border: none;
+            cursor: pointer;
+            font-size: 1rem;
+            color: #666;
+            border-bottom: 3px solid transparent;
+            transition: all 0.2s;
+        }
+
+        .tab:hover {
+            color: #667eea;
+        }
+
+        .tab.active {
+            color: #667eea;
+            border-bottom-color: #667eea;
+        }
+
+        .tab-content {
+            display: none;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        .card {
+            background: white;
+            border-radius: 8px;
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .card h2 {
+            margin-bottom: 1rem;
+            color: #667eea;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+            margin-bottom: 2rem;
+        }
+
+        .stat-card {
+            background: white;
+            padding: 1.5rem;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            text-align: center;
+        }
+
+        .stat-value {
+            font-size: 2.5rem;
+            font-weight: bold;
+            color: #667eea;
+            margin-bottom: 0.5rem;
+        }
+
+        .stat-label {
+            color: #888;
+            font-size: 0.9rem;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .jobs-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        .jobs-table th {
+            background: #f9f9f9;
+            padding: 1rem;
+            text-align: left;
+            font-weight: 600;
+            color: #666;
+            border-bottom: 2px solid #ddd;
+        }
+
+        .jobs-table td {
+            padding: 1rem;
+            border-bottom: 1px solid #eee;
+        }
+
+        .jobs-table tr:hover {
+            background: #f9f9f9;
+        }
+
+        .status-badge {
+            display: inline-block;
+            padding: 0.25rem 0.75rem;
+            border-radius: 12px;
+            font-size: 0.85rem;
+            font-weight: 500;
+        }
+
+        .status-pending { background: #fff3cd; color: #856404; }
+        .status-processing { background: #d1ecf1; color: #0c5460; }
+        .status-completed { background: #d4edda; color: #155724; }
+        .status-failed { background: #f8d7da; color: #721c24; }
+
+        .btn {
+            padding: 0.5rem 1rem;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.9rem;
+            transition: all 0.2s;
+        }
+
+        .btn-primary {
+            background: #667eea;
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: #5568d3;
+        }
+
+        .btn-secondary {
+            background: #6c757d;
+            color: white;
+        }
+
+        .btn-secondary:hover {
+            background: #5a6268;
+        }
+
+        .log-viewer {
+            background: #1e1e1e;
+            color: #d4d4d4;
+            padding: 1rem;
+            border-radius: 4px;
+            max-height: 600px;
+            overflow-y: auto;
+            font-family: 'Courier New', monospace;
+            font-size: 0.85rem;
+            line-height: 1.5;
+        }
+
+        .log-entry {
+            margin-bottom: 0.5rem;
+            padding: 0.5rem;
+            border-left: 3px solid #667eea;
+            background: #2d2d2d;
+        }
+
+        .log-timestamp {
+            color: #858585;
+        }
+
+        .log-request {
+            border-left-color: #4CAF50;
+        }
+
+        .log-response {
+            border-left-color: #2196F3;
+        }
+
+        .form-group {
+            margin-bottom: 1.5rem;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 0.5rem;
+            font-weight: 500;
+            color: #666;
+        }
+
+        .form-group input,
+        .form-group textarea {
+            width: 100%;
+            padding: 0.75rem;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 1rem;
+            font-family: inherit;
+        }
+
+        .form-group textarea {
+            min-height: 100px;
+            resize: vertical;
+        }
+
+        .image-preview {
+            margin-top: 1rem;
+            max-width: 400px;
+        }
+
+        .image-preview img {
+            max-width: 100%;
+            border-radius: 4px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+
+        .test-result {
+            margin-top: 1rem;
+            padding: 1rem;
+            border-radius: 4px;
+            background: #f9f9f9;
+            border-left: 4px solid #667eea;
+        }
+
+        .video-player {
+            margin-top: 1rem;
+            max-width: 600px;
+        }
+
+        .video-player video {
+            width: 100%;
+            border-radius: 4px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+
+        .loading {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #667eea;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 3rem;
+            color: #888;
+        }
+
+        .empty-state-icon {
+            font-size: 3rem;
+            margin-bottom: 1rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Grok Imagine API Dashboard</h1>
+        <div class="status">
+            <span class="status-dot"></span>
+            <span>Server Running</span>
+        </div>
+    </div>
+
+    <div class="container">
+        <!-- Stats Overview -->
+        <div class="stats-grid" id="statsGrid">
+            <div class="stat-card">
+                <div class="stat-value" id="statTotal">-</div>
+                <div class="stat-label">Total Jobs</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="statPending">-</div>
+                <div class="stat-label">Pending</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="statProcessing">-</div>
+                <div class="stat-label">Processing</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="statCompleted">-</div>
+                <div class="stat-label">Completed</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="statFailed">-</div>
+                <div class="stat-label">Failed</div>
+            </div>
+        </div>
+
+        <!-- Tabs -->
+        <div class="tabs">
+            <button class="tab active" onclick="switchTab('jobs')">Jobs</button>
+            <button class="tab" onclick="switchTab('logs')">Logs</button>
+            <button class="tab" onclick="switchTab('test')">Test</button>
+        </div>
+
+        <!-- Jobs Tab -->
+        <div id="jobsTab" class="tab-content active">
+            <div class="card">
+                <h2>Recent Jobs</h2>
+                <button class="btn btn-secondary" onclick="loadJobs()" style="margin-bottom: 1rem;">
+                    Refresh
+                </button>
+                <div id="jobsContainer"></div>
+            </div>
+        </div>
+
+        <!-- Logs Tab -->
+        <div id="logsTab" class="tab-content">
+            <div class="card">
+                <h2>Request Logs</h2>
+                <button class="btn btn-secondary" onclick="loadLogs()" style="margin-bottom: 1rem;">
+                    Refresh
+                </button>
+                <div class="log-viewer" id="logViewer">
+                    <div class="empty-state">
+                        <div class="empty-state-icon">📝</div>
+                        <p>Click "Refresh" to load logs</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Test Tab -->
+        <div id="testTab" class="tab-content">
+            <div class="card">
+                <h2>Test Video Generation</h2>
+                <form id="testForm" onsubmit="submitTest(event)">
+                    <div class="form-group">
+                        <label for="testPrompt">Prompt:</label>
+                        <textarea id="testPrompt" placeholder="Enter your video prompt..." required>A serene lake at sunset with mountains reflecting in the water</textarea>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="testImage">Image (optional):</label>
+                        <input type="file" id="testImage" accept="image/*" onchange="previewImage(event)">
+                        <div id="imagePreview" class="image-preview"></div>
+                    </div>
+
+                    <button type="submit" class="btn btn-primary" id="testSubmitBtn">
+                        Generate Video
+                    </button>
+                </form>
+
+                <div id="testResult"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Tab switching
+        function switchTab(tabName) {
+            document.querySelectorAll('.tab').forEach(tab => tab.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
+
+            event.target.classList.add('active');
+            document.getElementById(tabName + 'Tab').classList.add('active');
+
+            if (tabName === 'jobs') loadJobs();
+            if (tabName === 'logs') loadLogs();
+        }
+
+        // Load statistics
+        async function loadStats() {
+            try {
+                const response = await fetch('/jobs');
+                const data = await response.json();
+                const jobs = data.jobs || [];
+
+                const stats = {
+                    total: jobs.length,
+                    pending: jobs.filter(j => j.status === 'pending').length,
+                    processing: jobs.filter(j => j.status === 'processing').length,
+                    completed: jobs.filter(j => j.status === 'completed').length,
+                    failed: jobs.filter(j => j.status === 'failed').length
+                };
+
+                document.getElementById('statTotal').textContent = stats.total;
+                document.getElementById('statPending').textContent = stats.pending;
+                document.getElementById('statProcessing').textContent = stats.processing;
+                document.getElementById('statCompleted').textContent = stats.completed;
+                document.getElementById('statFailed').textContent = stats.failed;
+            } catch (error) {
+                console.error('Failed to load stats:', error);
+            }
+        }
+
+        // Load jobs
+        async function loadJobs() {
+            try {
+                const response = await fetch('/jobs');
+                const data = await response.json();
+                const jobs = data.jobs || [];
+
+                const container = document.getElementById('jobsContainer');
+
+                if (jobs.length === 0) {
+                    container.innerHTML = '<div class="empty-state"><div class="empty-state-icon">📭</div><p>No jobs yet</p></div>';
+                    return;
+                }
+
+                const tableHtml = `
+                    <table class="jobs-table">
+                        <thead>
+                            <tr>
+                                <th>Job ID</th>
+                                <th>Prompt</th>
+                                <th>Status</th>
+                                <th>Created</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${jobs.map(job => `
+                                <tr>
+                                    <td><code>${job.job_id}</code></td>
+                                    <td>${job.prompt.substring(0, 60)}${job.prompt.length > 60 ? '...' : ''}</td>
+                                    <td><span class="status-badge status-${job.status}">${job.status}</span></td>
+                                    <td>${new Date(job.created_at * 1000).toLocaleString()}</td>
+                                    <td>
+                                        ${job.status === 'completed' ? `<a href="/videos/${job.job_id}.mp4" class="btn btn-primary" target="_blank">Download</a>` : '-'}
+                                    </td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                `;
+
+                container.innerHTML = tableHtml;
+                loadStats();
+            } catch (error) {
+                console.error('Failed to load jobs:', error);
+                document.getElementById('jobsContainer').innerHTML = '<div class="empty-state"><p>Failed to load jobs</p></div>';
+            }
+        }
+
+        // Load logs
+        async function loadLogs() {
+            try {
+                const response = await fetch('/api/logs');
+                const data = await response.json();
+                const logs = data.logs || [];
+
+                const viewer = document.getElementById('logViewer');
+
+                if (logs.length === 0) {
+                    viewer.innerHTML = '<div class="empty-state" style="color: #888;"><p>No logs available</p></div>';
+                    return;
+                }
+
+                const logsHtml = logs.map(log => {
+                    const className = log.type === 'request' ? 'log-request' : 'log-response';
+                    return `
+                        <div class="log-entry ${className}">
+                            <span class="log-timestamp">${log.timestamp}</span>
+                            ${JSON.stringify(log, null, 2)}
+                        </div>
+                    `;
+                }).join('');
+
+                viewer.innerHTML = logsHtml;
+            } catch (error) {
+                console.error('Failed to load logs:', error);
+                document.getElementById('logViewer').innerHTML = '<div class="empty-state" style="color: #888;"><p>Failed to load logs</p></div>';
+            }
+        }
+
+        // Preview image
+        function previewImage(event) {
+            const file = event.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    document.getElementById('imagePreview').innerHTML = `<img src="${e.target.result}" alt="Preview">`;
+                };
+                reader.readAsDataURL(file);
+            }
+        }
+
+        // Submit test
+        async function submitTest(event) {
+            event.preventDefault();
+
+            const btn = document.getElementById('testSubmitBtn');
+            const resultDiv = document.getElementById('testResult');
+            const prompt = document.getElementById('testPrompt').value;
+            const imageFile = document.getElementById('testImage').files[0];
+
+            btn.disabled = true;
+            btn.innerHTML = '<span class="loading"></span> Generating...';
+
+            try {
+                // Convert image to base64 if present
+                let imageData = null;
+                if (imageFile) {
+                    imageData = await new Promise((resolve) => {
+                        const reader = new FileReader();
+                        reader.onload = (e) => resolve(e.target.result);
+                        reader.readAsDataURL(imageFile);
+                    });
+                }
+
+                // Create job
+                const response = await fetch('/v1/videos/generations', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        model: 'grok',
+                        prompt: prompt,
+                        image: imageData
+                    })
+                });
+
+                const job = await response.json();
+
+                resultDiv.innerHTML = `
+                    <div class="test-result">
+                        <h3>Job Created</h3>
+                        <p><strong>Job ID:</strong> ${job.id}</p>
+                        <p><strong>Status:</strong> <span class="status-badge status-${job.status}">${job.status}</span></p>
+                        <p><em>Waiting for extension to process...</em></p>
+                        <div style="margin-top: 1rem;">
+                            <button class="btn btn-secondary" onclick="checkJobStatus('${job.id}')">Check Status</button>
+                        </div>
+                        <div id="jobStatus_${job.id}"></div>
+                    </div>
+                `;
+
+                // Start polling for status
+                pollJobStatus(job.id);
+
+            } catch (error) {
+                resultDiv.innerHTML = `<div class="test-result" style="border-left-color: #f44336;"><p><strong>Error:</strong> ${error.message}</p></div>`;
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = 'Generate Video';
+            }
+        }
+
+        // Check job status
+        async function checkJobStatus(jobId) {
+            try {
+                const response = await fetch(`/v1/videos/generations/${jobId}`);
+                const job = await response.json();
+
+                const statusDiv = document.getElementById(`jobStatus_${jobId}`);
+                statusDiv.innerHTML = `
+                    <p><strong>Status:</strong> <span class="status-badge status-${job.status}">${job.status}</span></p>
+                    ${job.status === 'completed' ? `
+                        <div class="video-player">
+                            <video controls>
+                                <source src="${job.video_url}" type="video/mp4">
+                            </video>
+                            <p><a href="${job.video_url}" class="btn btn-primary" download>Download Video</a></p>
+                        </div>
+                    ` : ''}
+                    ${job.error ? `<p style="color: #f44336;"><strong>Error:</strong> ${job.error}</p>` : ''}
+                `;
+
+                return job;
+            } catch (error) {
+                console.error('Failed to check status:', error);
+            }
+        }
+
+        // Poll job status
+        async function pollJobStatus(jobId) {
+            const maxAttempts = 60; // 5 minutes
+            let attempts = 0;
+
+            const interval = setInterval(async () => {
+                attempts++;
+
+                const job = await checkJobStatus(jobId);
+
+                if (job && (job.status === 'completed' || job.status === 'failed')) {
+                    clearInterval(interval);
+                    loadStats();
+                } else if (attempts >= maxAttempts) {
+                    clearInterval(interval);
+                    console.log('Stopped polling after 5 minutes');
+                }
+            }, 5000);
+        }
+
+        // Initial load
+        loadStats();
+        loadJobs();
+
+        // Auto-refresh stats every 10 seconds
+        setInterval(loadStats, 10000);
+    </script>
+</body>
+</html>

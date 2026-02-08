@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Grok Imagine Assistant</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="container">
+    <!-- Header -->
+    <header class="header">
+      <h1>Grok Imagine Assistant</h1>
+      <div class="status-indicator" id="connectionStatus">
+        <span class="status-dot"></span>
+        <span class="status-text">Connecting...</span>
+      </div>
+    </header>
+
+    <!-- Worker Controls -->
+    <section class="section">
+      <h2>Worker Control</h2>
+      <div class="worker-controls">
+        <button id="startBtn" class="btn btn-primary" style="flex: 1;">
+          ▶ Start Worker
+        </button>
+        <button id="stopBtn" class="btn btn-secondary" style="flex: 1;">
+          ⏸ Stop Worker
+        </button>
+      </div>
+      <div id="workerStatus" class="worker-status">
+        Worker is stopped
+      </div>
+    </section>
+
+    <!-- Current Job -->
+    <section class="section" id="currentJobSection" style="display: none;">
+      <h2>Current Job</h2>
+      <div class="job-card">
+        <div class="job-id" id="currentJobId">job_123abc</div>
+        <div class="job-prompt" id="currentJobPrompt">Generating video...</div>
+        <div class="job-status" id="currentJobStatus">Waiting...</div>
+        <div class="progress-bar">
+          <div class="progress-fill" id="progressFill"></div>
+        </div>
+      </div>
+      <button id="resetBtn" class="btn btn-danger" style="margin-top: 12px; width: 100%;">
+        Reset Worker (Clear Stuck Job)
+      </button>
+    </section>
+
+    <!-- Stats -->
+    <section class="section">
+      <h2>Statistics</h2>
+      <div class="stats-grid">
+        <div class="stat-item">
+          <div class="stat-value" id="totalCompleted">0</div>
+          <div class="stat-label">Completed</div>
+        </div>
+        <div class="stat-item">
+          <div class="stat-value" id="totalFailed">0</div>
+          <div class="stat-label">Failed</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- History -->
+    <section class="section">
+      <h2>Recent History</h2>
+      <div id="historyList" class="history-list">
+        <div class="empty-state">No completed jobs yet</div>
+      </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="footer">
+      <button id="refreshBtn" class="btn btn-secondary">Refresh</button>
+      <a href="https://grok.com" target="_blank" class="btn btn-link">Open Grok</a>
+    </footer>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
