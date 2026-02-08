@@ -24,7 +24,8 @@
     "matches": ["https://grok.com/imagine*"],
     "js": ["content/content.js"],
     "css": ["content/styles.css"],
-    "run_at": "document_end"
+    "run_at": "document_end",
+    "all_frames": false
   }],
   "action": {
     "default_icon": {

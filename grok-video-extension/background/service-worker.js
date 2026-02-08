@@ -112,6 +112,41 @@ function stopPolling() {
   chrome.storage.local.set({ isPollingEnabled: false });
 }
 
+// Check if content script is ready with retries
+async function ensureContentScriptReady(tabId, maxRetries = 5) {
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      // Try to ping the content script
+      const response = await chrome.tabs.sendMessage(tabId, { type: 'PING' });
+      if (response && response.ready) {
+        console.log('✓ Content script is ready');
+        return true;
+      }
+    } catch (error) {
+      console.log(`Content script not ready, attempt ${i + 1}/${maxRetries}...`);
+
+      // If content script doesn't exist, try to inject it manually
+      if (i === 0) {
+        try {
+          await chrome.scripting.executeScript({
+            target: { tabId: tabId },
+            files: ['content/content.js']
+          });
+          console.log('Manually injected content script');
+        } catch (injectError) {
+          console.log('Could not inject content script:', injectError.message);
+        }
+      }
+
+      // Wait before retry (exponential backoff)
+      await new Promise(resolve => setTimeout(resolve, 500 * (i + 1)));
+    }
+  }
+
+  console.error('✗ Content script not ready after retries');
+  return false;
+}
+
 // Poll server for jobs
 async function pollServer() {
   try {
@@ -176,8 +211,19 @@ async function pollServer() {
 
     if (tabs.length === 0) {
       console.error('No Grok tab open');
-      await reportError(job.job_id, 'No Grok tab open. Please open https://grok.com in a tab.');
+      await reportError(job.job_id, 'No Grok tab open. Please open https://grok.com/imagine in a tab.');
       await chrome.storage.local.remove('currentJob'); // Clear so we can try next job
+      return;
+    }
+
+    // Ensure content script is ready before sending job
+    console.log('Checking if content script is ready...');
+    const isReady = await ensureContentScriptReady(tabs[0].id);
+
+    if (!isReady) {
+      console.error('Content script not ready');
+      await reportError(job.job_id, 'Content script not loaded. Please refresh the Grok tab and try again.');
+      await chrome.storage.local.remove('currentJob');
       return;
     }
 

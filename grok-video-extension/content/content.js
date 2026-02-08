@@ -15,7 +15,11 @@ window.addEventListener('error', (event) => {
 
 // Listen for job messages from background
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (message.type === 'START_JOB') {
+  if (message.type === 'PING') {
+    // Respond to ping to confirm content script is loaded
+    sendResponse({ ready: true });
+    return true;
+  } else if (message.type === 'START_JOB') {
     console.log('Starting job:', message.job.job_id);
     console.log('Job details:', {
       prompt: message.job.prompt,
