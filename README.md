@@ -1,6 +1,11 @@
 # Grok Imagine Assistant
 
-[![Demo Video](https://img.youtube.com/vi/QXs4h_SYPOM/maxresdefault.jpg)](https://youtu.be/QXs4h_SYPOM)
+<div align="center">
+  <a href="https://youtu.be/QXs4h_SYPOM">
+    <img src="https://img.youtube.com/vi/QXs4h_SYPOM/maxresdefault.jpg" alt="Watch Demo" style="width:80%;">
+  </a>
+  <p><strong>👆 Click to watch demo video</strong></p>
+</div>
 
 OpenAI-compatible API for automated video generation using Grok Imagine.
 
