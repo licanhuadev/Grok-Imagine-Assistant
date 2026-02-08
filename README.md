@@ -1,5 +1,7 @@
 # Grok Imagine Assistant
 
+[![Demo Video](https://img.youtube.com/vi/QXs4h_SYPOM/maxresdefault.jpg)](https://youtu.be/QXs4h_SYPOM)
+
 OpenAI-compatible API for automated video generation using Grok Imagine.
 
 ## What is This?
@@ -132,7 +134,6 @@ grok-imagine-loop/
 
 - **[SETUP.md](SETUP.md)** - Complete installation and setup guide
 - **[API.md](API.md)** - Full API reference and examples
-- **[docs/archive/](docs/archive/)** - Implementation notes and changelogs
 
 ## License
 
