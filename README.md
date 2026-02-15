@@ -7,27 +7,28 @@
   <p><strong>👆 Click to watch demo video</strong></p>
 </div>
 
-OpenAI-compatible API for automated video generation using Grok Imagine.
+OpenAI-compatible API for automated Grok video generation and Grok chat/vision (image-to-description) automation.
 
 ## What is This?
 
-Grok Imagine Assistant is a complete system that exposes Grok's video generation capabilities through an OpenAI-compatible REST API. It consists of:
+Grok Imagine Assistant is a complete system that exposes Grok capabilities through OpenAI-compatible REST endpoints. It consists of:
 
 1. **Python Server** - FastAPI server with job queue management
-2. **Chrome Extension** - Automated worker that controls Grok to generate videos
+2. **Chrome Extension** - Automated worker that controls Grok for video jobs and chat/vision jobs
 
-The extension runs in the background, polls the server for jobs, automates Grok's web interface to generate videos, and uploads them back to the server. This allows you to integrate Grok's video generation into your applications via simple API calls.
+The extension runs in the background, polls the server for jobs, automates Grok's web interface, and reports results back to the server. This allows simple API integration for both video workflows and image-based chat workflows.
 
 ## Features
 
 - **OpenAI-Compatible API** - Drop-in replacement for video generation workflows
+- **Chat/Vision Bridge** - OpenAI-style chat completion endpoint routed through Grok web automation
 - **Job Queue System** - Submit multiple jobs and process them sequentially
 - **Image-to-Video** - Support for generating videos from images with prompts
 - **Text-to-Video** - Generate videos from text prompts only
 - **Automatic Retry** - Handles failures and timeouts gracefully
 - **Real-time Status** - Track job progress through the extension UI
 - **Local Storage** - All videos stored locally on your machine
-- **No API Keys** - Uses your existing Grok account via browser automation
+- **No API Keys** - Uses your existing Grok account session via browser automation
 
 ## Quick Example
 
@@ -37,14 +38,20 @@ cd grok-video-server
 python server.py
 
 # Create a video generation job
-curl -X POST http://localhost:8000/v1/video/generations \
+curl -X POST http://localhost:8000/v1/videos/generations \
   -H "Content-Type: application/json" \
   -d '{"model":"grok","prompt":"A cat playing piano"}'
 
-# Response: {"id":"job_abc123","status":"pending",...}
-
-# Download the completed video
-curl -O http://localhost:8000/videos/job_abc123.mp4
+# Create a chat/vision request (text + image URL/data URL)
+curl -X POST http://localhost:8000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model":"grok-vision",
+    "messages":[{"role":"user","content":[
+      {"type":"text","text":"Describe this image"},
+      {"type":"image_url","image_url":{"url":"data:image/png;base64,...."}}
+    ]}]
+  }'
 ```
 
 ## System Requirements
@@ -64,16 +71,16 @@ For API documentation, see **[API.md](API.md)**.
 ```
 Your Application
       ↓
-  API Request (POST /v1/video/generations)
+  API Request (POST /v1/videos/generations or /v1/chat/completions)
       ↓
 Python Server (localhost:8000)
   - Creates job in queue
   - Returns job_id
       ↓
-Chrome Extension polls server
+Chrome Extension polls server by mode
   - Fetches next pending job
-  - Automates Grok Imagine
-  - Uploads video back to server
+  - Runs video flow or chat flow
+  - Uploads video or chat text back to server
       ↓
 Your Application polls status
   - Gets video_url when complete
@@ -82,18 +89,12 @@ Your Application polls status
 
 ## How It Works
 
-1. You submit a video generation request to the API server
+1. You submit a video generation request or chat completion request
 2. Server creates a job and adds it to the queue
 3. Chrome extension polls the server every 10 seconds
-4. Extension automates Grok's web interface:
-   - Navigates to grok.com/imagine
-   - Uploads image (if provided)
-   - Enters text prompt
-   - Clicks generate button
-   - Waits for video to complete
-   - Downloads the video blob
-5. Extension uploads video to server
-6. You download the completed video from the server
+4. Extension automates Grok web UI for the matching job type
+5. Extension reports completion back to server
+6. Client receives video URL (video) or assistant text (chat)
 
 ## Project Structure
 
@@ -122,6 +123,7 @@ grok-imagine-loop/
 ## Use Cases
 
 - **Batch video generation** - Generate multiple videos programmatically
+- **Image to description** - Use chat/vision endpoint for image analysis through Grok UI
 - **Integration with existing apps** - Add video generation to your application
 - **Automated workflows** - Create videos as part of automated pipelines
 - **Testing and prototyping** - Quick video generation for testing

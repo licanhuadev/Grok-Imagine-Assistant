@@ -1,16 +1,18 @@
 # Grok Imagine Assistant - Chrome Extension
 
-Chrome extension that automates Grok Imagine video generation and acts as a worker for the Grok Imagine API server.
+Chrome extension worker that automates Grok for both video generation and chat/vision jobs from the local API server.
 
 ## Features
 
 - **Automated Video Generation**: Automates Grok.com to generate videos
-- **Polling Worker**: Polls server for jobs every 10 seconds
+- **Automated Chat/Vision Flow**: Handles image + context chat requests and extracts assistant response text
+- **Dual Workers**: Separate Start/Stop controls for Chat and Video
+- **Polling Worker**: Polls server for mode-specific jobs every 10 seconds
 - **Job Queue Processing**: Processes jobs sequentially
 - **Progress Tracking**: Real-time status updates in popup UI
 - **History Management**: Keeps last 10 completed jobs
 - **Statistics**: Tracks completed and failed jobs
-- **Configurable Server**: Change server URL in settings
+- **History Cleanup**: One-click clean history in popup
 
 ## Installation
 
@@ -37,27 +39,27 @@ For testing, the extension will work with default Chrome icons.
    ```
 
 2. **Open Grok**:
-   - Navigate to https://grok.com in a Chrome tab
+   - Open https://grok.com (chat jobs)
+   - Open https://grok.com/imagine (video jobs)
    - Log in if necessary
-   - Keep this tab open while processing jobs
+   - Keep tabs open while processing jobs
 
 3. **Configure extension**:
    - Click the extension icon
-   - Verify server URL is correct (default: `http://localhost:8000`)
    - Check connection status shows "Connected"
 
 ## Usage
 
 ### Automatic Mode
 
-The extension automatically polls the server every 10 seconds. When a job is available:
+The extension has separate polling controls for each mode:
 
-1. Extension fetches the job
-2. Automates Grok to generate the video
-3. Downloads the generated video
-4. Uploads the video to the server
-5. Updates job status
-6. Moves to the next job
+1. **Start Chat** - polls and processes chat/vision jobs
+2. **Start Video** - polls and processes video jobs
+
+When a job is available:
+- Chat mode: upload images, insert text, submit, wait for response, extract markdown text, upload result to server
+- Video mode: upload image (optional), enter prompt, generate video, download blob, upload video to server
 
 ### Monitor Progress
 
@@ -65,43 +67,33 @@ Click the extension icon to see:
 - **Connection Status**: Server connectivity
 - **Current Job**: Active job details and progress
 - **Statistics**: Total completed and failed jobs
-- **History**: Last 10 completed jobs with video previews
+- **History**: Last 10 completed/failed jobs
 
-### View History
+### Clear History
 
-- Click on any history item to expand and play the video
-- Videos are streamed from the server
+- Click `Clean History` at the bottom of popup to clear extension-side history rows.
 
 ## Configuration
 
-### Server URL
-
-Change the server URL in the popup settings:
-1. Click extension icon
-2. Enter new server URL (e.g., `http://192.168.1.100:8000`)
-3. Click "Save"
-4. Connection status will update automatically
-
-### Polling Interval
-
-Currently fixed at 10 seconds. To change, edit `background/service-worker.js`:
-```javascript
-const POLL_INTERVAL = 10000; // Change this value (in milliseconds)
-```
+Update `config.json`:
+- `extension.pollIntervalSeconds`
+- `extension.videoTimeoutSeconds`
+- `extension.chat.timeoutSeconds`
+- `extension.chat.imageUploadDelayMs`
 
 ## Architecture
 
 ### Components
 
 1. **Background Service Worker** (`background/service-worker.js`)
-   - Polls server for jobs
+   - Polls server for jobs by mode
    - Manages job state
-   - Uploads completed videos
+   - Uploads completed videos/chat responses
    - Handles errors
 
 2. **Content Script** (`content/content.js`)
-   - Automates Grok interface
-   - Handles video generation flow
+   - Automates Grok web UI for chat/video flows
+   - Extracts chat response markdown text
    - Downloads generated videos
    - Reports progress
 
@@ -113,12 +105,17 @@ const POLL_INTERVAL = 10000; // Change this value (in milliseconds)
 
 ### Automation Flow
 
+Video flow:
 ```
-1. Receive job → 2. Upload image (if any) → 3. Enter prompt
-    ↓
-4. Click submit → 5. Wait for generation → 6. Download video
-    ↓
-7. Upload to server → 8. Update history → 9. Get next job
+1. Receive video job → 2. Upload image (if any) → 3. Enter prompt
+4. Submit → 5. Wait for video → 6. Download video → 7. Upload to server
+```
+
+Chat flow:
+```
+1. Receive chat job → 2. Upload images (if any) → 3. Enter context text
+4. Submit → 5. Wait response complete → 6. Extract .response-content-markdown text
+7. Upload chat content to server
 ```
 
 ## Troubleshooting
@@ -138,7 +135,9 @@ const POLL_INTERVAL = 10000; // Change this value (in milliseconds)
 ### Job fails to process
 
 **Common issues:**
-1. **No Grok tab open**: Open https://grok.com in a tab
+1. **No Grok tab open**:
+   - Open https://grok.com for chat jobs
+   - Open https://grok.com/imagine for video jobs
 2. **Not logged in**: Log in to Grok
 3. **Rate limited**: Wait before sending more jobs
 4. **Content moderation**: Prompt may violate policies
@@ -151,7 +150,7 @@ const POLL_INTERVAL = 10000; // Change this value (in milliseconds)
 ### Video not generated
 
 **Check:**
-- Grok tab is visible (not minimized/background)
+- Grok imagine tab is open and loaded
 - Grok interface is responsive
 - No error messages on Grok page
 - Browser has permission to access Grok.com
@@ -221,18 +220,18 @@ The extension uses `chrome.storage.local`:
 
 ```javascript
 {
-  "serverUrl": "http://localhost:8000",
   "currentJob": {
     "jobId": "job_123abc",
     "prompt": "A cat playing piano",
-    "image": null,
+    "mode": "video",
     "status": "processing",
-    "progressStatus": "Waiting for video generation...",
+    "progressStatus": "Waiting...",
     "startedAt": 1675389721000
   },
   "history": [
     {
       "jobId": "job_123abc",
+      "mode": "video",
       "prompt": "A cat playing piano",
       "videoUrl": "http://localhost:8000/videos/job_123abc.mp4",
       "completedAt": 1675389821000
@@ -257,10 +256,10 @@ The extension requires:
 ## Known Limitations
 
 1. **Sequential Processing**: Only one job at a time
-2. **Single Tab**: Requires one Grok tab open
+2. **Tab Requirements**: Requires Grok tab(s) open for active modes
 3. **Rate Limits**: Subject to Grok's rate limits
 4. **Browser Open**: Requires Chrome running (not headless)
-5. **No Persistence**: Jobs reset if extension reloads
+5. **In-flight Jobs**: Jobs can fail if extension/browser is reloaded
 
 ## Future Improvements
 
