@@ -54,3 +54,4 @@ class ChatCompletionRequest(BaseModel):
     messages: List[Dict[str, Any]] = Field(..., description="OpenAI chat messages")
     temperature: Optional[float] = Field(default=0.2, description="Sampling temperature")
     max_tokens: Optional[int] = Field(default=512, description="Max tokens for completion")
+    response_format: Optional[Dict[str, Any]] = Field(default=None, description="Optional response format, e.g. {\"type\":\"json_object\"}")

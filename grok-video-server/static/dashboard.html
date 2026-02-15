@@ -425,6 +425,13 @@
                         <input type="file" id="chatImages" accept="image/*" multiple>
                     </div>
 
+                    <div class="form-group">
+                        <label style="display: flex; align-items: center; gap: 8px; font-weight: 500;">
+                            <input type="checkbox" id="chatJsonMode">
+                            Request JSON object response_format
+                        </label>
+                    </div>
+
                     <button type="submit" class="btn btn-primary" id="chatTestSubmitBtn">
                         Send Chat Request
                     </button>
@@ -669,6 +676,7 @@
             const model = document.getElementById('chatModel').value.trim() || 'grok-vision';
             const contextText = document.getElementById('chatContext').value.trim();
             const files = Array.from(document.getElementById('chatImages').files || []);
+            const jsonMode = document.getElementById('chatJsonMode').checked;
 
             btn.disabled = true;
             btn.innerHTML = '<span class="loading"></span> Sending...';
@@ -698,6 +706,10 @@
                         }
                     ]
                 };
+
+                if (jsonMode) {
+                    payload.response_format = { type: 'json_object' };
+                }
 
                 const response = await fetch('/v1/chat/completions', {
                     method: 'POST',

@@ -74,6 +74,34 @@ def _extract_user_prompt(messages):
     return "Vision chat request"
 
 
+def _wants_json_object_response(request: ChatCompletionRequest) -> bool:
+    response_format = request.response_format
+    if not isinstance(response_format, dict):
+        return False
+    return response_format.get("type") == "json_object"
+
+
+def _extract_first_json_object(text: str):
+    """
+    Best-effort extractor for first valid JSON object embedded in free-form text.
+    Returns JSON string if found, otherwise None.
+    """
+    if not text:
+        return None
+
+    decoder = json.JSONDecoder()
+    for i, ch in enumerate(text):
+        if ch != '{':
+            continue
+        try:
+            parsed, end = decoder.raw_decode(text[i:])
+            if isinstance(parsed, dict):
+                return text[i:i + end]
+        except json.JSONDecodeError:
+            continue
+    return None
+
+
 @app.get("/", response_class=HTMLResponse)
 async def root():
     """Serve dashboard"""
@@ -334,6 +362,7 @@ async def create_chat_completion(request: ChatCompletionRequest):
     """
     start_time = time.time()
     prompt_for_history = _extract_user_prompt(request.messages)
+    wants_json_object = _wants_json_object_response(request)
 
     job = await job_queue.create_job(
         prompt=prompt_for_history,
@@ -355,6 +384,16 @@ async def create_chat_completion(request: ChatCompletionRequest):
 
         if latest and latest.status == JobStatus.COMPLETED:
             content = latest.text_response or ""
+            if wants_json_object:
+                extracted_json = _extract_first_json_object(content)
+                if extracted_json:
+                    content = extracted_json
+                else:
+                    logger.log_response(
+                        job_id=job.job_id,
+                        status=JobStatus.COMPLETED,
+                        error="response_format=json_object requested but no JSON object found in model output"
+                    )
             duration = time.time() - start_time
             logger.log_response(
                 job_id=job.job_id,
