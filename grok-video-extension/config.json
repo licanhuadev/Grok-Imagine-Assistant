@@ -6,10 +6,16 @@
     "logPath": "../grok-video-server/logs",
     "dbPath": "../grok-video-server/jobs.db",
     "maxVideoAgeDays": 7,
-    "jobTimeoutSeconds": 300
+    "jobTimeoutSeconds": 300,
+    "chatJobTimeoutSeconds": 60,
+    "chatCompletionWaitSeconds": 60
   },
   "extension": {
     "pollIntervalSeconds": 10,
-    "videoTimeoutSeconds": 300
+    "videoTimeoutSeconds": 300,
+    "chat": {
+      "timeoutSeconds": 60,
+      "imageUploadDelayMs": 5000
+    }
   }
 }

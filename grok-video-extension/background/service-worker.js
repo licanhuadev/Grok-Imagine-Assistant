@@ -1,11 +1,23 @@
-// Background service worker for polling server and managing jobs
+// Background service worker for polling server and managing chat/video jobs
 
 const SERVER_URL = 'http://localhost:8000';
 let POLL_INTERVAL = 10000; // 10 seconds
 let VIDEO_TIMEOUT_SECONDS = 300; // 5 minutes
+let CHAT_TIMEOUT_SECONDS = 60; // 1 minute
+let CHAT_IMAGE_UPLOAD_DELAY_MS = 5000;
 
 let pollingInterval = null;
-let isPollingEnabled = false;
+let chatPollingEnabled = false;
+let videoPollingEnabled = false;
+const cancelledJobIds = new Set();
+
+async function initializeRuntimeState() {
+  await loadConfig();
+  await loadPollingState();
+  if (isAnyPollingEnabled() && !pollingInterval) {
+    startPollingLoop();
+  }
+}
 
 // Load configuration from config.json
 async function loadConfig() {
@@ -16,26 +28,45 @@ async function loadConfig() {
     if (config.extension) {
       POLL_INTERVAL = (config.extension.pollIntervalSeconds || 10) * 1000;
       VIDEO_TIMEOUT_SECONDS = config.extension.videoTimeoutSeconds || 300;
+      CHAT_TIMEOUT_SECONDS = config.extension.chat?.timeoutSeconds || 60;
+      CHAT_IMAGE_UPLOAD_DELAY_MS = config.extension.chat?.imageUploadDelayMs || 5000;
     }
 
     console.log('Config loaded:', {
       serverUrl: SERVER_URL,
       pollInterval: POLL_INTERVAL,
-      videoTimeout: VIDEO_TIMEOUT_SECONDS
+      videoTimeout: VIDEO_TIMEOUT_SECONDS,
+      chatTimeout: CHAT_TIMEOUT_SECONDS,
+      chatImageUploadDelayMs: CHAT_IMAGE_UPLOAD_DELAY_MS
     });
   } catch (error) {
     console.warn('Could not load config.json, using defaults:', error);
   }
 }
 
+async function loadPollingState() {
+  const state = await chrome.storage.local.get(['chatPollingEnabled', 'videoPollingEnabled']);
+  chatPollingEnabled = !!state.chatPollingEnabled;
+  videoPollingEnabled = !!state.videoPollingEnabled;
+}
+
+async function savePollingState() {
+  await chrome.storage.local.set({
+    chatPollingEnabled,
+    videoPollingEnabled
+  });
+}
+
+function isAnyPollingEnabled() {
+  return chatPollingEnabled || videoPollingEnabled;
+}
+
 // Initialize on install
 chrome.runtime.onInstalled.addListener(async () => {
   console.log('Grok Imagine Assistant installed');
 
-  // Load config first
   await loadConfig();
 
-  // Initialize stats
   const { stats } = await chrome.storage.local.get('stats');
   if (!stats) {
     await chrome.storage.local.set({
@@ -46,18 +77,9 @@ chrome.runtime.onInstalled.addListener(async () => {
     });
   }
 
-  // Initialize polling state (default: stopped)
-  const { isPollingEnabled: savedPollingState } = await chrome.storage.local.get('isPollingEnabled');
-  if (savedPollingState === undefined) {
-    await chrome.storage.local.set({ isPollingEnabled: false });
-    isPollingEnabled = false;
-  } else {
-    isPollingEnabled = savedPollingState;
-  }
-
-  // Only start polling if enabled
-  if (isPollingEnabled) {
-    startPolling();
+  await loadPollingState();
+  if (isAnyPollingEnabled()) {
+    startPollingLoop();
   }
 });
 
@@ -65,58 +87,80 @@ chrome.runtime.onInstalled.addListener(async () => {
 chrome.runtime.onStartup.addListener(async () => {
   console.log('Extension started');
   await loadConfig();
+  await loadPollingState();
 
-  // Load polling state
-  const { isPollingEnabled: savedPollingState } = await chrome.storage.local.get('isPollingEnabled');
-  isPollingEnabled = savedPollingState !== false; // Default to true if not set
-
-  if (isPollingEnabled) {
-    startPolling();
+  if (isAnyPollingEnabled()) {
+    startPollingLoop();
   }
 });
 
 // Open side panel when extension icon is clicked
 chrome.action.onClicked.addListener(async (tab) => {
-  // Open side panel for the current window
   await chrome.sidePanel.open({ windowId: tab.windowId });
 });
 
-// Start polling loop
-function startPolling() {
+initializeRuntimeState();
+
+function startPollingLoop() {
   if (pollingInterval) {
     clearInterval(pollingInterval);
   }
 
-  isPollingEnabled = true;
   pollingInterval = setInterval(pollServer, POLL_INTERVAL);
-  console.log('Polling started');
-
-  // Save state
-  chrome.storage.local.set({ isPollingEnabled: true });
-
-  // Poll immediately
+  console.log('Polling loop started');
   pollServer();
 }
 
-// Stop polling loop
-function stopPolling() {
-  if (pollingInterval) {
+function stopPollingLoopIfIdle() {
+  if (!isAnyPollingEnabled() && pollingInterval) {
     clearInterval(pollingInterval);
     pollingInterval = null;
+    console.log('Polling loop stopped (all modes disabled)');
+  }
+}
+
+async function setChatPolling(enabled) {
+  chatPollingEnabled = enabled;
+  if (!enabled) {
+    await cancelCurrentJobForMode('chat');
+  }
+  await savePollingState();
+  if (enabled) {
+    startPollingLoop();
+  } else {
+    stopPollingLoopIfIdle();
+  }
+}
+
+async function setVideoPolling(enabled) {
+  videoPollingEnabled = enabled;
+  if (!enabled) {
+    await cancelCurrentJobForMode('video');
+  }
+  await savePollingState();
+  if (enabled) {
+    startPollingLoop();
+  } else {
+    stopPollingLoopIfIdle();
+  }
+}
+
+async function cancelCurrentJobForMode(mode) {
+  const { currentJob } = await chrome.storage.local.get('currentJob');
+  if (!currentJob || currentJob.status !== 'processing' || currentJob.mode !== mode) {
+    return;
   }
 
-  isPollingEnabled = false;
-  console.log('Polling stopped');
-
-  // Save state
-  chrome.storage.local.set({ isPollingEnabled: false });
+  const reason = `Cancelled by user (${mode} worker stopped)`;
+  console.log(`Cancelling current ${mode} job:`, currentJob.jobId);
+  cancelledJobIds.add(currentJob.jobId);
+  await handleJobFailed(currentJob.jobId, reason);
 }
 
 // Check if content script is ready with retries
 async function ensureContentScriptReady(tabId, maxRetries = 5) {
   for (let i = 0; i < maxRetries; i++) {
     try {
-      // Try to ping the content script
       const response = await chrome.tabs.sendMessage(tabId, { type: 'PING' });
       if (response && response.ready) {
         console.log('✓ Content script is ready');
@@ -125,7 +169,6 @@ async function ensureContentScriptReady(tabId, maxRetries = 5) {
     } catch (error) {
       console.log(`Content script not ready, attempt ${i + 1}/${maxRetries}...`);
 
-      // If content script doesn't exist, try to inject it manually
       if (i === 0) {
         try {
           await chrome.scripting.executeScript({
@@ -138,7 +181,6 @@ async function ensureContentScriptReady(tabId, maxRetries = 5) {
         }
       }
 
-      // Wait before retry (exponential backoff)
       await new Promise(resolve => setTimeout(resolve, 500 * (i + 1)));
     }
   }
@@ -147,102 +189,158 @@ async function ensureContentScriptReady(tabId, maxRetries = 5) {
   return false;
 }
 
+async function pollServerForMode(mode) {
+  const response = await fetch(`${SERVER_URL}/extension/poll?mode=${mode}`);
+
+  if (response.status === 204) {
+    return null;
+  }
+
+  if (!response.ok) {
+    console.error(`Poll failed for mode=${mode}:`, response.status);
+    return null;
+  }
+
+  return response.json();
+}
+
+async function waitForTabComplete(tabId, timeoutMs = 20000) {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    const tab = await chrome.tabs.get(tabId);
+    if (tab.status === 'complete') {
+      return true;
+    }
+    await new Promise(resolve => setTimeout(resolve, 300));
+  }
+  return false;
+}
+
+async function getTargetGrokTabForJob(jobType) {
+  if (jobType === 'chat') {
+    const tabs = await chrome.tabs.query({ url: 'https://grok.com/*' });
+    if (tabs.length === 0) {
+      throw new Error('No Grok tab open. Please open https://grok.com/ in a tab.');
+    }
+
+    const tab = tabs[0];
+    const targetUrl = 'https://grok.com/';
+    if (tab.url !== targetUrl) {
+      await chrome.tabs.update(tab.id, { url: targetUrl });
+      const loaded = await waitForTabComplete(tab.id);
+      if (!loaded) {
+        throw new Error('Timed out waiting for https://grok.com/ to load.');
+      }
+    }
+    return tab.id;
+  }
+
+  const tabs = await chrome.tabs.query({ url: 'https://grok.com/imagine*' });
+  if (tabs.length === 0) {
+    throw new Error('No Grok tab open. Please open https://grok.com/imagine in a tab.');
+  }
+  return tabs[0].id;
+}
+
 // Poll server for jobs
 async function pollServer() {
   try {
-    // Check if polling is enabled
-    if (!isPollingEnabled) {
-      console.log('Polling is disabled, skipping poll');
+    if (!isAnyPollingEnabled()) {
       return;
     }
 
-    // Check if already processing
     const { currentJob } = await chrome.storage.local.get('currentJob');
     if (currentJob && currentJob.status === 'processing') {
-      // Check if job is stuck (processing for more than 5 minutes)
       const processingTime = Date.now() - (currentJob.startedAt || 0);
-      const MAX_PROCESSING_TIME = 5 * 60 * 1000; // 5 minutes
+      const maxProcessingTime = ((currentJob.timeoutSeconds || VIDEO_TIMEOUT_SECONDS) + 60) * 1000;
 
-      if (processingTime > MAX_PROCESSING_TIME) {
-        console.warn('Job stuck in processing for', Math.floor(processingTime / 1000), 'seconds. Clearing...');
+      if (processingTime > maxProcessingTime) {
+        console.warn('Job stuck in processing. Clearing:', currentJob.jobId);
         await reportError(currentJob.jobId, 'Job timed out - stuck in processing state');
         await chrome.storage.local.remove('currentJob');
 
-        // Update stats
         const { stats } = await chrome.storage.local.get('stats');
         stats.totalFailed = (stats.totalFailed || 0) + 1;
         await chrome.storage.local.set({ stats });
       } else {
-        console.log('Already processing job, skipping poll. Time:', Math.floor(processingTime / 1000), 'seconds');
         return;
       }
     }
 
-    // Poll server
-    const response = await fetch(`${SERVER_URL}/extension/poll`);
+    const modes = [];
+    if (videoPollingEnabled) modes.push('video');
+    if (chatPollingEnabled) modes.push('chat');
+    if (modes.length === 0) return;
 
-    if (response.status === 204) {
-      // No jobs available
-      console.log('No jobs available');
+    let job = null;
+    for (const mode of modes) {
+      job = await pollServerForMode(mode);
+      if (job) break;
+    }
+
+    if (!job) {
       return;
     }
 
-    if (!response.ok) {
-      console.error('Poll failed:', response.status);
-      return;
-    }
-
-    const job = await response.json();
-    console.log('Received job:', job.job_id);
-
-    // Store job and set status
     await chrome.storage.local.set({
       currentJob: {
         jobId: job.job_id,
         prompt: job.prompt,
         image: job.image,
+        mode: job.job_type || 'video',
         status: 'processing',
-        startedAt: Date.now()
+        startedAt: Date.now(),
+        timeoutSeconds: job.job_type === 'chat' ? CHAT_TIMEOUT_SECONDS : VIDEO_TIMEOUT_SECONDS
       }
     });
 
-    // Find Grok tab
-    const tabs = await chrome.tabs.query({ url: 'https://grok.com/imagine*' });
-
-    if (tabs.length === 0) {
-      console.error('No Grok tab open');
-      await reportError(job.job_id, 'No Grok tab open. Please open https://grok.com/imagine in a tab.');
-      await chrome.storage.local.remove('currentJob'); // Clear so we can try next job
+    let tabId;
+    try {
+      tabId = await getTargetGrokTabForJob(job.job_type || 'video');
+    } catch (tabError) {
+      await reportError(job.job_id, tabError.message);
+      await chrome.storage.local.remove('currentJob');
       return;
     }
 
-    // Ensure content script is ready before sending job
-    console.log('Checking if content script is ready...');
-    const isReady = await ensureContentScriptReady(tabs[0].id);
-
+    const isReady = await ensureContentScriptReady(tabId);
     if (!isReady) {
-      console.error('Content script not ready');
       await reportError(job.job_id, 'Content script not loaded. Please refresh the Grok tab and try again.');
       await chrome.storage.local.remove('currentJob');
       return;
     }
 
-    // Send job to content script (include config values)
     try {
-      await chrome.tabs.sendMessage(tabs[0].id, {
-        type: 'START_JOB',
-        job: {
-          ...job,
-          videoTimeoutSeconds: VIDEO_TIMEOUT_SECONDS
-        }
-      });
-      console.log('Job sent to content script successfully');
+      if (job.job_type === 'chat') {
+        const chatConfig = {
+          timeoutSeconds: CHAT_TIMEOUT_SECONDS,
+          imageUploadDelayMs: CHAT_IMAGE_UPLOAD_DELAY_MS
+        };
+        console.log('Sending START_CHAT_JOB with chatConfig:', chatConfig);
+        await chrome.tabs.sendMessage(tabId, {
+          type: 'START_CHAT_JOB',
+          job: {
+            ...job,
+            mode: 'chat',
+            chatConfig
+          }
+        });
+      } else {
+        await chrome.tabs.sendMessage(tabId, {
+          type: 'START_JOB',
+          job: {
+            ...job,
+            mode: 'video',
+            videoTimeoutSeconds: VIDEO_TIMEOUT_SECONDS
+          }
+        });
+      }
+      console.log('Job sent to content script successfully:', job.job_id, job.job_type);
     } catch (error) {
       console.error('Failed to send message to content script:', error);
       await reportError(job.job_id, 'Failed to communicate with Grok tab. Please refresh the page.');
-      await chrome.storage.local.remove('currentJob'); // Clear so we can try next job
+      await chrome.storage.local.remove('currentJob');
     }
-
   } catch (error) {
     console.error('Polling error:', error);
   }
@@ -251,155 +349,168 @@ async function pollServer() {
 // Listen for messages from content script and popup
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === 'JOB_COMPLETED') {
-    console.log('Received JOB_COMPLETED message');
-    console.log('Job ID:', message.jobId);
-    console.log('Video type:', message.videoType);
-    console.log('Video data type:', typeof message.videoData);
-    console.log('Video data is Array:', Array.isArray(message.videoData));
-    console.log('Video data length:', message.videoData?.length);
-
-    // Convert Array back to Uint8Array then to Blob
+    if (cancelledJobIds.has(message.jobId)) {
+      console.log('Ignoring JOB_COMPLETED for cancelled job:', message.jobId);
+      cancelledJobIds.delete(message.jobId);
+      return true;
+    }
     const uint8Array = new Uint8Array(message.videoData);
-    console.log('✓ Converted to Uint8Array, length:', uint8Array.length);
-    console.log('First 10 bytes:', Array.from(uint8Array.slice(0, 10)));
-
     const videoBlob = new Blob([uint8Array], { type: message.videoType });
-    console.log('Created blob, size:', videoBlob.size);
-    handleJobCompleted(message.jobId, videoBlob);
+    handleVideoJobCompleted(message.jobId, videoBlob);
+  } else if (message.type === 'JOB_CHAT_COMPLETED') {
+    if (cancelledJobIds.has(message.jobId)) {
+      console.log('Ignoring JOB_CHAT_COMPLETED for cancelled job:', message.jobId);
+      cancelledJobIds.delete(message.jobId);
+      return true;
+    }
+    handleChatJobCompleted(message.jobId, message.content || '');
   } else if (message.type === 'JOB_FAILED') {
+    if (cancelledJobIds.has(message.jobId)) {
+      console.log('Ignoring JOB_FAILED for already-cancelled job:', message.jobId);
+      cancelledJobIds.delete(message.jobId);
+      return true;
+    }
     handleJobFailed(message.jobId, message.error);
   } else if (message.type === 'UPDATE_STATUS') {
     updateJobStatus(message.status);
-  } else if (message.type === 'START_POLLING') {
-    startPolling();
-    sendResponse({ success: true, isPollingEnabled: true });
-  } else if (message.type === 'STOP_POLLING') {
-    stopPolling();
-    sendResponse({ success: true, isPollingEnabled: false });
+  } else if (message.type === 'START_CHAT_POLLING') {
+    setChatPolling(true).then(() => sendResponse({ success: true, chatPollingEnabled, videoPollingEnabled }));
+  } else if (message.type === 'STOP_CHAT_POLLING') {
+    setChatPolling(false).then(() => sendResponse({ success: true, chatPollingEnabled, videoPollingEnabled }));
+  } else if (message.type === 'START_VIDEO_POLLING') {
+    setVideoPolling(true).then(() => sendResponse({ success: true, chatPollingEnabled, videoPollingEnabled }));
+  } else if (message.type === 'STOP_VIDEO_POLLING') {
+    setVideoPolling(false).then(() => sendResponse({ success: true, chatPollingEnabled, videoPollingEnabled }));
   } else if (message.type === 'GET_POLLING_STATE') {
-    sendResponse({ isPollingEnabled: isPollingEnabled });
+    sendResponse({ chatPollingEnabled, videoPollingEnabled });
   }
-  return true; // Keep channel open for async response
+  return true;
 });
 
-// Handle job completion
-async function handleJobCompleted(jobId, videoBlob) {
-  console.log('Job completed:', jobId);
-  console.log('Video blob size:', videoBlob.size, 'bytes');
-  console.log('Video blob type:', videoBlob.type);
-
+async function handleVideoJobCompleted(jobId, videoBlob) {
   try {
-    // Validate blob
     if (!videoBlob || videoBlob.size === 0) {
       throw new Error('Invalid video blob - size is 0');
     }
 
-    console.log('Uploading to server:', SERVER_URL);
-
-    // Test: Read first few bytes of blob to verify it's not corrupted
-    const testSlice = videoBlob.slice(0, 100);
-    const testArray = new Uint8Array(await testSlice.arrayBuffer());
-    console.log('First 10 bytes of video:', Array.from(testArray.slice(0, 10)));
-
-    // Upload video to server
     const formData = new FormData();
     formData.append('job_id', jobId);
     formData.append('video', videoBlob, `${jobId}.mp4`);
-
-    console.log('FormData created');
-    console.log('FormData entries:');
-    for (let pair of formData.entries()) {
-      console.log('  -', pair[0], ':', typeof pair[1], pair[1] instanceof Blob ? `Blob (${pair[1].size} bytes)` : pair[1]);
-    }
-    console.log('Uploading...');
 
     const response = await fetch(`${SERVER_URL}/extension/complete`, {
       method: 'POST',
       body: formData
     });
 
-    console.log('Upload response status:', response.status);
-
     if (!response.ok) {
       const errorText = await response.text();
-      console.error('Upload failed:', errorText);
       throw new Error(`Upload failed: ${response.status} - ${errorText}`);
     }
 
-    const result = await response.json();
-    console.log('✓ Video uploaded successfully:', result);
-
-    // Update stats
     const { stats } = await chrome.storage.local.get('stats');
     stats.totalCompleted = (stats.totalCompleted || 0) + 1;
     await chrome.storage.local.set({ stats });
 
-    // Add to history
     const { history = [] } = await chrome.storage.local.get('history');
     const { currentJob } = await chrome.storage.local.get('currentJob');
 
     history.unshift({
       jobId: jobId,
+      mode: 'video',
       prompt: currentJob?.prompt || '',
       videoUrl: `${SERVER_URL}/videos/${jobId}.mp4`,
       completedAt: Date.now()
     });
 
-    // Keep only last 10 items
     if (history.length > 10) {
       history.splice(10);
     }
 
     await chrome.storage.local.set({ history });
-
-    // Clear current job
     await chrome.storage.local.remove('currentJob');
-
   } catch (error) {
-    console.error('Failed to upload video:', error);
     await reportError(jobId, `Failed to upload video: ${error.message}`);
 
-    // Update stats
     const { stats } = await chrome.storage.local.get('stats');
     stats.totalFailed = (stats.totalFailed || 0) + 1;
     await chrome.storage.local.set({ stats });
 
-    // IMPORTANT: Always clear current job even if upload fails
     await chrome.storage.local.remove('currentJob');
   }
 }
 
-// Handle job failure
+async function handleChatJobCompleted(jobId, content) {
+  try {
+    const response = await fetch(`${SERVER_URL}/extension/complete/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        job_id: jobId,
+        content
+      })
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Chat completion upload failed: ${response.status} - ${errorText}`);
+    }
+
+    const { stats } = await chrome.storage.local.get('stats');
+    stats.totalCompleted = (stats.totalCompleted || 0) + 1;
+    await chrome.storage.local.set({ stats });
+
+    const { history = [] } = await chrome.storage.local.get('history');
+    const { currentJob } = await chrome.storage.local.get('currentJob');
+
+    history.unshift({
+      jobId: jobId,
+      mode: 'chat',
+      prompt: currentJob?.prompt || '',
+      textResponse: content,
+      completedAt: Date.now()
+    });
+
+    if (history.length > 10) {
+      history.splice(10);
+    }
+
+    await chrome.storage.local.set({ history });
+    await chrome.storage.local.remove('currentJob');
+  } catch (error) {
+    await reportError(jobId, `Failed to complete chat job: ${error.message}`);
+
+    const { stats } = await chrome.storage.local.get('stats');
+    stats.totalFailed = (stats.totalFailed || 0) + 1;
+    await chrome.storage.local.set({ stats });
+
+    await chrome.storage.local.remove('currentJob');
+  }
+}
+
 async function handleJobFailed(jobId, error) {
-  console.error('Job failed:', jobId, error);
   await reportError(jobId, error);
 
-  // Update stats
   const { stats } = await chrome.storage.local.get('stats');
   stats.totalFailed = (stats.totalFailed || 0) + 1;
   await chrome.storage.local.set({ stats });
 
-  // Add to history
   const { history = [] } = await chrome.storage.local.get('history');
   const { currentJob } = await chrome.storage.local.get('currentJob');
 
   history.unshift({
     jobId: jobId,
+    mode: currentJob?.mode || 'video',
     prompt: currentJob?.prompt || '',
     status: 'failed',
     error: error,
-    videoUrl: `${SERVER_URL}/videos/${jobId}.mp4`,
     failedAt: Date.now()
   });
 
-  // Keep only last 10 items
   if (history.length > 10) {
     history.splice(10);
   }
 
   await chrome.storage.local.set({ history });
-
-  // Clear current job
   await chrome.storage.local.remove('currentJob');
 }
 

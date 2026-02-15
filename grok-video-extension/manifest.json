@@ -21,7 +21,7 @@
     "service_worker": "background/service-worker.js"
   },
   "content_scripts": [{
-    "matches": ["https://grok.com/imagine*"],
+    "matches": ["https://grok.com/*"],
     "js": ["content/content.js"],
     "css": ["content/styles.css"],
     "run_at": "document_end",

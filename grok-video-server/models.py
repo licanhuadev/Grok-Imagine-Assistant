@@ -1,7 +1,6 @@
 from pydantic import BaseModel, Field
-from typing import Optional, Literal
+from typing import Optional, Any, Dict, List
 from enum import Enum
-from datetime import datetime
 
 
 class JobStatus(str, Enum):
@@ -9,6 +8,11 @@ class JobStatus(str, Enum):
     PROCESSING = "processing"
     COMPLETED = "completed"
     FAILED = "failed"
+
+
+class JobType(str, Enum):
+    VIDEO = "video"
+    CHAT = "chat"
 
 
 class VideoGenerationRequest(BaseModel):
@@ -29,10 +33,24 @@ class VideoGenerationResponse(BaseModel):
 
 class ExtensionPollResponse(BaseModel):
     job_id: str = Field(..., description="Job ID to process")
-    prompt: str = Field(..., description="Video generation prompt")
+    job_type: JobType = Field(..., description="Type of job for extension worker")
+    prompt: str = Field(..., description="Prompt for job processing")
     image: Optional[str] = Field(None, description="Base64 encoded image or null")
+    request: Optional[Dict[str, Any]] = Field(None, description="Raw OpenAI-style request for chat jobs")
 
 
 class ExtensionErrorRequest(BaseModel):
     job_id: str = Field(..., description="Job ID that failed")
     error: str = Field(..., description="Error message")
+
+
+class ExtensionChatCompleteRequest(BaseModel):
+    job_id: str = Field(..., description="Job ID that completed")
+    content: str = Field(..., description="Assistant text content")
+
+
+class ChatCompletionRequest(BaseModel):
+    model: str = Field(default="grok-vision", description="Model to use")
+    messages: List[Dict[str, Any]] = Field(..., description="OpenAI chat messages")
+    temperature: Optional[float] = Field(default=0.2, description="Sampling temperature")
+    max_tokens: Optional[int] = Field(default=512, description="Max tokens for completion")

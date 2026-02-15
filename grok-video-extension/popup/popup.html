@@ -20,16 +20,29 @@
     <!-- Worker Controls -->
     <section class="section">
       <h2>Worker Control</h2>
+      <div style="font-size: 12px; color: #666; margin-bottom: 8px;">Chat Worker</div>
       <div class="worker-controls">
-        <button id="startBtn" class="btn btn-primary" style="flex: 1;">
-          ▶ Start Worker
+        <button id="startChatBtn" class="btn btn-primary" style="flex: 1;">
+          ▶ Start Chat
         </button>
-        <button id="stopBtn" class="btn btn-secondary" style="flex: 1;">
-          ⏸ Stop Worker
+        <button id="stopChatBtn" class="btn btn-secondary" style="flex: 1;">
+          ⏸ Stop Chat
         </button>
       </div>
-      <div id="workerStatus" class="worker-status">
-        Worker is stopped
+      <div id="chatWorkerStatus" class="worker-status">
+        Chat worker is stopped
+      </div>
+      <div style="font-size: 12px; color: #666; margin: 12px 0 8px;">Video Worker</div>
+      <div class="worker-controls">
+        <button id="startVideoBtn" class="btn btn-primary" style="flex: 1;">
+          ▶ Start Video
+        </button>
+        <button id="stopVideoBtn" class="btn btn-secondary" style="flex: 1;">
+          ⏸ Stop Video
+        </button>
+      </div>
+      <div id="videoWorkerStatus" class="worker-status">
+        Video worker is stopped
       </div>
     </section>
 
@@ -38,15 +51,13 @@
       <h2>Current Job</h2>
       <div class="job-card">
         <div class="job-id" id="currentJobId">job_123abc</div>
+        <div class="job-id" id="currentJobMode">Mode: video</div>
         <div class="job-prompt" id="currentJobPrompt">Generating video...</div>
         <div class="job-status" id="currentJobStatus">Waiting...</div>
         <div class="progress-bar">
           <div class="progress-fill" id="progressFill"></div>
         </div>
       </div>
-      <button id="resetBtn" class="btn btn-danger" style="margin-top: 12px; width: 100%;">
-        Reset Worker (Clear Stuck Job)
-      </button>
     </section>
 
     <!-- Stats -->
@@ -74,8 +85,9 @@
 
     <!-- Footer -->
     <footer class="footer">
-      <button id="refreshBtn" class="btn btn-secondary">Refresh</button>
       <a href="https://grok.com" target="_blank" class="btn btn-link">Open Grok</a>
+      <a href="https://grok.com/imagine" target="_blank" class="btn btn-link">Open Grok Image</a>
+      <button id="cleanHistoryBtn" class="btn btn-secondary" type="button">Clean History</button>
     </footer>
   </div>
 

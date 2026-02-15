@@ -357,6 +357,9 @@
                 <button class="btn btn-secondary" onclick="loadJobs()" style="margin-bottom: 1rem;">
                     Refresh
                 </button>
+                <button class="btn btn-secondary" onclick="clearJobs()" style="margin-bottom: 1rem; margin-left: 0.5rem;">
+                    Clean Jobs
+                </button>
                 <div id="jobsContainer"></div>
             </div>
         </div>
@@ -367,6 +370,9 @@
                 <h2>Request Logs</h2>
                 <button class="btn btn-secondary" onclick="loadLogs()" style="margin-bottom: 1rem;">
                     Refresh
+                </button>
+                <button class="btn btn-secondary" onclick="clearLogs()" style="margin-bottom: 1rem; margin-left: 0.5rem;">
+                    Clean Logs
                 </button>
                 <div class="log-viewer" id="logViewer">
                     <div class="empty-state">
@@ -399,6 +405,32 @@
                 </form>
 
                 <div id="testResult"></div>
+            </div>
+
+            <div class="card">
+                <h2>Test Chat Completion</h2>
+                <form id="chatTestForm" onsubmit="submitChatTest(event)">
+                    <div class="form-group">
+                        <label for="chatModel">Model:</label>
+                        <input id="chatModel" type="text" value="grok-vision">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="chatContext">Context Text:</label>
+                        <textarea id="chatContext" placeholder="Enter context text..." required>Describe each image and summarize the common theme.</textarea>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="chatImages">Images (optional, multiple):</label>
+                        <input type="file" id="chatImages" accept="image/*" multiple>
+                    </div>
+
+                    <button type="submit" class="btn btn-primary" id="chatTestSubmitBtn">
+                        Send Chat Request
+                    </button>
+                </form>
+
+                <div id="chatTestResult" class="test-result" style="display: none;"></div>
             </div>
         </div>
     </div>
@@ -490,6 +522,20 @@
             }
         }
 
+        async function clearJobs() {
+            if (!confirm('Delete all jobs?')) return;
+
+            try {
+                const response = await fetch('/jobs', { method: 'DELETE' });
+                if (!response.ok) throw new Error(`Failed to clear jobs: ${response.status}`);
+                await loadJobs();
+                await loadStats();
+            } catch (error) {
+                console.error('Failed to clear jobs:', error);
+                alert(`Failed to clear jobs: ${error.message}`);
+            }
+        }
+
         // Load logs
         async function loadLogs() {
             try {
@@ -518,6 +564,19 @@
             } catch (error) {
                 console.error('Failed to load logs:', error);
                 document.getElementById('logViewer').innerHTML = '<div class="empty-state" style="color: #888;"><p>Failed to load logs</p></div>';
+            }
+        }
+
+        async function clearLogs() {
+            if (!confirm('Delete all logs?')) return;
+
+            try {
+                const response = await fetch('/api/logs', { method: 'DELETE' });
+                if (!response.ok) throw new Error(`Failed to clear logs: ${response.status}`);
+                await loadLogs();
+            } catch (error) {
+                console.error('Failed to clear logs:', error);
+                alert(`Failed to clear logs: ${error.message}`);
             }
         }
 
@@ -590,6 +649,78 @@
             } finally {
                 btn.disabled = false;
                 btn.innerHTML = 'Generate Video';
+            }
+        }
+
+        async function fileToDataUrl(file) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = () => resolve(reader.result);
+                reader.onerror = () => reject(new Error(`Failed reading file: ${file.name}`));
+                reader.readAsDataURL(file);
+            });
+        }
+
+        async function submitChatTest(event) {
+            event.preventDefault();
+
+            const btn = document.getElementById('chatTestSubmitBtn');
+            const resultDiv = document.getElementById('chatTestResult');
+            const model = document.getElementById('chatModel').value.trim() || 'grok-vision';
+            const contextText = document.getElementById('chatContext').value.trim();
+            const files = Array.from(document.getElementById('chatImages').files || []);
+
+            btn.disabled = true;
+            btn.innerHTML = '<span class="loading"></span> Sending...';
+            resultDiv.style.display = 'block';
+            resultDiv.innerHTML = '<p><em>Sending chat request and waiting for extension...</em></p>';
+
+            try {
+                const content = [];
+                if (contextText) {
+                    content.push({ type: 'text', text: contextText });
+                }
+
+                for (const file of files) {
+                    const dataUrl = await fileToDataUrl(file);
+                    content.push({
+                        type: 'image_url',
+                        image_url: { url: dataUrl }
+                    });
+                }
+
+                const payload = {
+                    model,
+                    messages: [
+                        {
+                            role: 'user',
+                            content: content.length ? content : [{ type: 'text', text: 'Hello from dashboard chat test' }]
+                        }
+                    ]
+                };
+
+                const response = await fetch('/v1/chat/completions', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                const data = await response.json().catch(() => ({}));
+                if (!response.ok) {
+                    throw new Error(data.detail || `Request failed: ${response.status}`);
+                }
+
+                const reply = data?.choices?.[0]?.message?.content || '';
+                resultDiv.innerHTML = `
+                    <h3>Chat Response</h3>
+                    <p><strong>Model:</strong> ${data.model || model}</p>
+                    <pre style="white-space: pre-wrap; margin-top: 8px;">${reply}</pre>
+                `;
+            } catch (error) {
+                resultDiv.innerHTML = `<p style="color: #f44336;"><strong>Error:</strong> ${error.message}</p>`;
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = 'Send Chat Request';
             }
         }
 

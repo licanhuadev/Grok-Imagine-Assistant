@@ -2,68 +2,65 @@
 
 const SERVER_URL = 'http://localhost:8000';
 
-// DOM elements
 let connectionStatus;
 let currentJobSection;
 let currentJobId;
+let currentJobMode;
 let currentJobPrompt;
 let currentJobStatus;
 let progressFill;
 let totalCompleted;
 let totalFailed;
 let historyList;
-let refreshBtn;
-let resetBtn;
-let startBtn;
-let stopBtn;
-let workerStatus;
+let startChatBtn;
+let stopChatBtn;
+let startVideoBtn;
+let stopVideoBtn;
+let chatWorkerStatus;
+let videoWorkerStatus;
+let cleanHistoryBtn;
 
-// Initialize
 document.addEventListener('DOMContentLoaded', async () => {
-  // Get DOM elements
   connectionStatus = document.getElementById('connectionStatus');
   currentJobSection = document.getElementById('currentJobSection');
   currentJobId = document.getElementById('currentJobId');
+  currentJobMode = document.getElementById('currentJobMode');
   currentJobPrompt = document.getElementById('currentJobPrompt');
   currentJobStatus = document.getElementById('currentJobStatus');
   progressFill = document.getElementById('progressFill');
   totalCompleted = document.getElementById('totalCompleted');
   totalFailed = document.getElementById('totalFailed');
   historyList = document.getElementById('historyList');
-  refreshBtn = document.getElementById('refreshBtn');
-  resetBtn = document.getElementById('resetBtn');
-  startBtn = document.getElementById('startBtn');
-  stopBtn = document.getElementById('stopBtn');
-  workerStatus = document.getElementById('workerStatus');
+  startChatBtn = document.getElementById('startChatBtn');
+  stopChatBtn = document.getElementById('stopChatBtn');
+  startVideoBtn = document.getElementById('startVideoBtn');
+  stopVideoBtn = document.getElementById('stopVideoBtn');
+  chatWorkerStatus = document.getElementById('chatWorkerStatus');
+  videoWorkerStatus = document.getElementById('videoWorkerStatus');
+  cleanHistoryBtn = document.getElementById('cleanHistoryBtn');
 
-  // Load data
   await loadData();
 
-  // Event listeners
-  refreshBtn.addEventListener('click', loadData);
-  resetBtn.addEventListener('click', resetWorker);
-  startBtn.addEventListener('click', startWorker);
-  stopBtn.addEventListener('click', stopWorker);
+  startChatBtn.addEventListener('click', startChatWorker);
+  stopChatBtn.addEventListener('click', stopChatWorker);
+  startVideoBtn.addEventListener('click', startVideoWorker);
+  stopVideoBtn.addEventListener('click', stopVideoWorker);
+  cleanHistoryBtn.addEventListener('click', cleanHistory);
 
-  // Update worker status
   await updateWorkerStatus();
 
-  // Listen for storage changes
   chrome.storage.onChanged.addListener((changes, namespace) => {
-    if (namespace === 'local') {
-      loadData();
-      if (changes.isPollingEnabled) {
-        updateWorkerStatus();
-      }
+    if (namespace !== 'local') return;
+    loadData();
+    if (changes.chatPollingEnabled || changes.videoPollingEnabled) {
+      updateWorkerStatus();
     }
   });
 
-  // Check server connection
   checkServerConnection();
-  setInterval(checkServerConnection, 10000); // Check every 10 seconds
+  setInterval(checkServerConnection, 10000);
 });
 
-// Load data from storage
 async function loadData() {
   const data = await chrome.storage.local.get([
     'currentJob',
@@ -71,28 +68,22 @@ async function loadData() {
     'history'
   ]);
 
-  // Current job
   if (data.currentJob) {
     showCurrentJob(data.currentJob);
   } else {
     hideCurrentJob();
   }
 
-  // Stats
   const stats = data.stats || { totalCompleted: 0, totalFailed: 0 };
   totalCompleted.textContent = stats.totalCompleted || 0;
   totalFailed.textContent = stats.totalFailed || 0;
 
-  // History
-  const history = data.history || [];
-  renderHistory(history);
+  renderHistory(data.history || []);
 }
 
-// Check server connection
 async function checkServerConnection() {
   try {
     const response = await fetch(`${SERVER_URL}/`, { method: 'GET' });
-
     if (response.ok) {
       connectionStatus.className = 'status-indicator connected';
       connectionStatus.querySelector('.status-text').textContent = 'Connected';
@@ -106,24 +97,27 @@ async function checkServerConnection() {
   }
 }
 
-// Show current job
 function showCurrentJob(job) {
   currentJobSection.style.display = 'block';
 
   currentJobId.textContent = job.jobId || 'N/A';
+  currentJobMode.textContent = `Mode: ${(job.mode || 'video').toUpperCase()}`;
   currentJobPrompt.textContent = job.prompt || 'No prompt';
   currentJobStatus.textContent = job.progressStatus || job.status || 'Processing...';
 
-  // Update progress bar (simple animation)
   const statusMap = {
-    'processing': 20,
+    'processing': 15,
     'Initializing...': 10,
+    'Initializing chat...': 10,
+    'Navigating to imagine page...': 25,
     'Finding prompt input...': 20,
     'Uploading image...': 30,
     'Entering prompt...': 40,
     'Submitting request...': 50,
     'Waiting for video generation...': 70,
     'Downloading video...': 90,
+    'Generating description (placeholder)...': 80,
+    'Preparing for next job...': 95,
     'Completed!': 100
   };
 
@@ -131,31 +125,28 @@ function showCurrentJob(job) {
   progressFill.style.width = `${progress}%`;
 }
 
-// Hide current job
 function hideCurrentJob() {
   currentJobSection.style.display = 'none';
 }
 
-// Render history
 function renderHistory(history) {
   if (!history || history.length === 0) {
     historyList.innerHTML = '<div class="empty-state">No completed jobs yet</div>';
     return;
   }
 
-  // Create table
   const table = document.createElement('table');
   table.className = 'history-table';
   table.innerHTML = `
     <thead>
       <tr>
         <th>Time</th>
+        <th>Mode</th>
         <th>Status</th>
         <th>Job ID</th>
       </tr>
     </thead>
-    <tbody>
-    </tbody>
+    <tbody></tbody>
   `;
 
   const tbody = table.querySelector('tbody');
@@ -164,15 +155,17 @@ function renderHistory(history) {
     const row = document.createElement('tr');
     const status = item.status || (item.error ? 'failed' : 'completed');
     const statusClass = status === 'completed' ? 'status-success' : 'status-failed';
+    const mode = (item.mode || 'video').toUpperCase();
+
+    const idCell = item.videoUrl
+      ? `<a href="${item.videoUrl}" target="_blank" title="${item.prompt || 'No prompt'}">${item.jobId || 'Unknown'}</a>`
+      : `<span title="${item.prompt || 'No prompt'}">${item.jobId || 'Unknown'}</span>`;
 
     row.innerHTML = `
       <td class="history-time">${formatDetailedTime(item.completedAt || item.failedAt)}</td>
+      <td>${mode}</td>
       <td><span class="status-badge ${statusClass}">${status === 'completed' ? '✓ Pass' : '✗ Fail'}</span></td>
-      <td class="history-job-link">
-        <a href="${item.videoUrl || `${SERVER_URL}/videos/${item.jobId}.mp4`}" target="_blank" title="${item.prompt || 'No prompt'}">
-          ${item.jobId || 'Unknown'}
-        </a>
-      </td>
+      <td class="history-job-link">${idCell}</td>
     `;
 
     tbody.appendChild(row);
@@ -182,122 +175,71 @@ function renderHistory(history) {
   historyList.appendChild(table);
 }
 
-// Format timestamp
-function formatTime(timestamp) {
-  if (!timestamp) return 'Unknown time';
-
-  const date = new Date(timestamp);
-  const now = new Date();
-  const diff = now - date;
-
-  // Less than 1 minute
-  if (diff < 60000) {
-    return 'Just now';
-  }
-
-  // Less than 1 hour
-  if (diff < 3600000) {
-    const minutes = Math.floor(diff / 60000);
-    return `${minutes} minute${minutes > 1 ? 's' : ''} ago`;
-  }
-
-  // Less than 24 hours
-  if (diff < 86400000) {
-    const hours = Math.floor(diff / 3600000);
-    return `${hours} hour${hours > 1 ? 's' : ''} ago`;
-  }
-
-  // Show date
-  return date.toLocaleDateString() + ' ' + date.toLocaleTimeString();
-}
-
-// Format detailed time for history table (day/hh:mm)
 function formatDetailedTime(timestamp) {
   if (!timestamp) return 'Unknown';
-
   const date = new Date(timestamp);
   const day = String(date.getDate()).padStart(2, '0');
   const hours = String(date.getHours()).padStart(2, '0');
   const minutes = String(date.getMinutes()).padStart(2, '0');
-
   return `${day}/${hours}:${minutes}`;
 }
 
-// Reset worker (clear stuck job)
-async function resetWorker() {
-  if (!confirm('Are you sure you want to reset the worker? This will clear any stuck job.')) {
-    return;
-  }
-
-  console.log('Resetting worker...');
-
-  // Clear current job
-  await chrome.storage.local.remove('currentJob');
-
-  // Show feedback
-  resetBtn.textContent = 'Worker Reset!';
-  resetBtn.style.background = '#4CAF50';
-
-  setTimeout(() => {
-    resetBtn.textContent = 'Reset Worker (Clear Stuck Job)';
-    resetBtn.style.background = '';
-  }, 2000);
-
-  // Reload data
-  await loadData();
-
-  console.log('Worker reset complete');
+async function startChatWorker() {
+  const response = await chrome.runtime.sendMessage({ type: 'START_CHAT_POLLING' });
+  if (response?.success) await updateWorkerStatus();
 }
 
-// Start worker
-async function startWorker() {
-  console.log('Starting worker...');
-
-  // Send message to background to start polling
-  const response = await chrome.runtime.sendMessage({ type: 'START_POLLING' });
-
-  if (response.success) {
-    console.log('Worker started');
-    await updateWorkerStatus();
-  }
+async function stopChatWorker() {
+  const response = await chrome.runtime.sendMessage({ type: 'STOP_CHAT_POLLING' });
+  if (response?.success) await updateWorkerStatus();
 }
 
-// Stop worker
-async function stopWorker() {
-  console.log('Stopping worker...');
-
-  // Send message to background to stop polling
-  const response = await chrome.runtime.sendMessage({ type: 'STOP_POLLING' });
-
-  if (response.success) {
-    console.log('Worker stopped');
-    await updateWorkerStatus();
-  }
+async function startVideoWorker() {
+  const response = await chrome.runtime.sendMessage({ type: 'START_VIDEO_POLLING' });
+  if (response?.success) await updateWorkerStatus();
 }
 
-// Update worker status display
+async function stopVideoWorker() {
+  const response = await chrome.runtime.sendMessage({ type: 'STOP_VIDEO_POLLING' });
+  if (response?.success) await updateWorkerStatus();
+}
+
 async function updateWorkerStatus() {
-  // Get current polling state from background
   const response = await chrome.runtime.sendMessage({ type: 'GET_POLLING_STATE' });
+  const isChatOn = !!response?.chatPollingEnabled;
+  const isVideoOn = !!response?.videoPollingEnabled;
 
-  if (response.isPollingEnabled) {
-    workerStatus.textContent = '✓ Worker is running - polling for jobs';
-    workerStatus.className = 'worker-status active';
-    startBtn.disabled = true;
-    stopBtn.disabled = false;
-    startBtn.style.opacity = '0.5';
-    stopBtn.style.opacity = '1';
+  if (isChatOn) {
+    chatWorkerStatus.textContent = '✓ Chat worker is running';
+    chatWorkerStatus.className = 'worker-status active';
   } else {
-    workerStatus.textContent = '⏸ Worker is stopped - not polling';
-    workerStatus.className = 'worker-status stopped';
-    startBtn.disabled = false;
-    stopBtn.disabled = true;
-    startBtn.style.opacity = '1';
-    stopBtn.style.opacity = '0.5';
+    chatWorkerStatus.textContent = '⏸ Chat worker is stopped';
+    chatWorkerStatus.className = 'worker-status stopped';
   }
 
-  // Also update from storage
-  const { isPollingEnabled } = await chrome.storage.local.get('isPollingEnabled');
-  console.log('Worker polling enabled:', isPollingEnabled);
+  if (isVideoOn) {
+    videoWorkerStatus.textContent = '✓ Video worker is running';
+    videoWorkerStatus.className = 'worker-status active';
+  } else {
+    videoWorkerStatus.textContent = '⏸ Video worker is stopped';
+    videoWorkerStatus.className = 'worker-status stopped';
+  }
+
+  startChatBtn.disabled = isChatOn;
+  stopChatBtn.disabled = !isChatOn;
+  startVideoBtn.disabled = isVideoOn;
+  stopVideoBtn.disabled = !isVideoOn;
+
+  startChatBtn.style.opacity = isChatOn ? '0.5' : '1';
+  stopChatBtn.style.opacity = isChatOn ? '1' : '0.5';
+  startVideoBtn.style.opacity = isVideoOn ? '0.5' : '1';
+  stopVideoBtn.style.opacity = isVideoOn ? '1' : '0.5';
 }
 
+async function cleanHistory() {
+  const confirmed = confirm('Clear extension history?');
+  if (!confirmed) return;
+
+  await chrome.storage.local.set({ history: [] });
+  await loadData();
+}

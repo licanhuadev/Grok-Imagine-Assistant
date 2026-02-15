@@ -26,7 +26,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       hasImage: !!message.job.image,
       timeout: message.job.videoTimeoutSeconds
     });
-    processJob(message.job);
+    processVideoJob(message.job);
+  } else if (message.type === 'START_CHAT_JOB') {
+    console.log('Starting chat job:', message.job.job_id);
+    processChatJob(message.job);
   } else if (message.type === 'EXTRACT_VIDEO') {
     console.log('Extracting video from current page...');
     extractVideoFromPage()
@@ -43,7 +46,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 });
 
 // Main job processing function
-async function processJob(job) {
+async function processVideoJob(job) {
   console.log('=== Starting job processing ===');
   console.log('Job ID:', job.job_id);
   console.log('Prompt:', job.prompt);
@@ -56,13 +59,14 @@ async function processJob(job) {
     // 0. Navigate to main imagine page if on post page
     console.log('Step 0: Ensuring we are on main imagine page...');
     updateStatus('Navigating to imagine page...');
-    await navigateToImaginePage();
+    await navigateToVideoImaginePage();
     console.log('✓ On main imagine page');
 
     // 1. Find prompt input
     console.log('Step 1: Finding prompt input...');
     updateStatus('Finding prompt input...');
-    let promptInput = await findPromptInput();
+    await waitForDocumentComplete();
+    let promptInput = await findVideoPromptInput();
     if (!promptInput) {
       throw new Error('Prompt input not found. Is Grok Imagine page fully loaded?');
     }
@@ -79,12 +83,13 @@ async function processJob(job) {
         // Wait for page to navigate to new URL with image UUID
         console.log('Step 2.1: Waiting for URL to update to imagine/post/{UUID}...');
         updateStatus('Waiting for image page to load...');
-        await waitForImagePageLoad();
+        await waitForVideoImagePageLoad();
         console.log('✓ Image page loaded with UUID');
 
         // Wait for "Make a video" textarea to appear on the new page
         console.log('Step 2.2: Waiting for "Make a video" textarea...');
         updateStatus('Finding video prompt input...');
+        await waitForDocumentComplete();
         const videoPromptInput = await findMakeVideoTextarea();
         if (!videoPromptInput) {
           throw new Error('Make a video textarea not found after image upload');
@@ -112,7 +117,8 @@ async function processJob(job) {
     // 4. Find and click submit button
     console.log('Step 4: Finding and clicking submit button...');
     updateStatus('Submitting request...');
-    const submitBtn = await findSubmitButton();
+    await waitForDocumentComplete();
+    const submitBtn = await findVideoSubmitButton();
     if (!submitBtn) {
       throw new Error('Submit button not found. Grok UI may have changed.');
     }
@@ -124,6 +130,7 @@ async function processJob(job) {
     // 5. Wait for video generation
     console.log('Step 5: Waiting for video generation...');
     updateStatus('Waiting for video generation...');
+    await waitForDocumentComplete();
     const timeout = (job.videoTimeoutSeconds || 300) * 1000;
     console.log('Timeout:', timeout / 1000, 'seconds');
     const videoUrl = await waitForVideoResponse(timeout);
@@ -182,6 +189,8 @@ async function processJob(job) {
     });
 
     updateStatus('Completed!');
+    await sleep(1000);
+    await prepareVideoForNextUse();
     console.log('=== Job completed successfully ===');
 
   } catch (error) {
@@ -198,8 +207,9 @@ async function processJob(job) {
 }
 
 // Find prompt input textarea
-async function findPromptInput(maxAttempts = 10) {
+async function findVideoPromptInput(maxAttempts = 10) {
   console.log('Searching for prompt input...');
+  await waitForDocumentComplete();
 
   for (let i = 0; i < maxAttempts; i++) {
     console.log(`Attempt ${i + 1}/${maxAttempts}...`);
@@ -237,8 +247,9 @@ async function findPromptInput(maxAttempts = 10) {
 }
 
 // Find submit button
-async function findSubmitButton(maxAttempts = 10) {
+async function findVideoSubmitButton(maxAttempts = 10) {
   console.log('Searching for submit button...');
+  await waitForDocumentComplete();
 
   for (let i = 0; i < maxAttempts; i++) {
     console.log(`Attempt ${i + 1}/${maxAttempts}...`);
@@ -310,6 +321,7 @@ async function insertTextFast(element, text) {
 
 // Upload image to Grok (from original extension)
 async function uploadImageToGrok(base64Image) {
+  await waitForDocumentComplete();
   // Step 2.1: Find and click the Attach button
   console.log('Step 2.1: Finding Attach button...');
   const attachButton = await findAttachButton();
@@ -325,6 +337,7 @@ async function uploadImageToGrok(base64Image) {
 
   // Step 2.2: Find file input (should appear after clicking attach)
   console.log('Step 2.2: Finding file input...');
+  await waitForDocumentComplete();
   const fileInput = await findFileInput();
   if (!fileInput) {
     throw new Error('File input not found after clicking Attach');
@@ -353,6 +366,7 @@ async function uploadImageToGrok(base64Image) {
 // Find Attach button on Grok Imagine page
 async function findAttachButton(maxAttempts = 10) {
   console.log('Searching for Attach button...');
+  await waitForDocumentComplete();
 
   for (let i = 0; i < maxAttempts; i++) {
     console.log(`Attempt ${i + 1}/${maxAttempts}...`);
@@ -362,7 +376,7 @@ async function findAttachButton(maxAttempts = 10) {
       'button[aria-label="Attach"]',  // Most specific
       'button.group\\/attach-button',  // Class-based selector
       'button[type="button"][aria-label="Attach"]',  // More specific
-      'button:has(svg) [aria-label="Attach"]',  // Button with SVG icon
+      'button[aria-label="Attach"][type="button"]',  // Explicit type + aria
     ];
 
     for (const selector of selectors) {
@@ -386,6 +400,7 @@ async function findAttachButton(maxAttempts = 10) {
 // Find Back button on Grok Imagine post page
 async function findBackButton(maxAttempts = 10) {
   console.log('Searching for Back button...');
+  await waitForDocumentComplete();
 
   for (let i = 0; i < maxAttempts; i++) {
     console.log(`Attempt ${i + 1}/${maxAttempts}...`);
@@ -419,6 +434,7 @@ async function findBackButton(maxAttempts = 10) {
 // Find file input
 async function findFileInput(maxAttempts = 10) {
   console.log('Searching for file input...');
+  await waitForDocumentComplete();
 
   for (let i = 0; i < maxAttempts; i++) {
     console.log(`Attempt ${i + 1}/${maxAttempts}...`);
@@ -453,10 +469,9 @@ async function findFileInput(maxAttempts = 10) {
 
 // Convert base64 to blob
 async function base64ToBlob(base64) {
-  // Remove data URL prefix if present
-  const base64Data = base64.replace(/^data:image\/\w+;base64,/, '');
-
-  const response = await fetch(`data:image/png;base64,${base64Data}`);
+  const isDataUrl = base64.startsWith('data:');
+  const dataUrl = isDataUrl ? base64 : `data:image/png;base64,${base64}`;
+  const response = await fetch(dataUrl);
   return await response.blob();
 }
 
@@ -500,6 +515,7 @@ async function simulateClick(element) {
 
 // Wait for video response (adapted from original extension)
 async function waitForVideoResponse(timeout = 120000) {
+  await waitForDocumentComplete();
   const startTime = Date.now();
   let lastStatus = '';
 
@@ -629,6 +645,7 @@ function findVideoElement() {
 // Extract video URL from current page (for manual download)
 async function extractVideoFromPage() {
   console.log('Looking for video element on page...');
+  await waitForDocumentComplete();
 
   // Find video element
   const videoElement = findVideoElement();
@@ -672,7 +689,7 @@ async function extractVideoFromPage() {
 
 // Wait for image page to load after upload
 // Navigate to main imagine page if currently on a post page
-async function navigateToImaginePage(timeout = 10000) {
+async function navigateToVideoImaginePage(timeout = 10000) {
   const currentUrl = window.location.href;
   const postUrlPattern = /https:\/\/grok\.com\/imagine\/post\/[a-f0-9-]{36}/;
 
@@ -722,7 +739,7 @@ async function navigateToImaginePage(timeout = 10000) {
   throw new Error(`Unexpected URL: ${currentUrl}. Expected https://grok.com/imagine`);
 }
 
-async function waitForImagePageLoad(timeout = 30000) {
+async function waitForVideoImagePageLoad(timeout = 30000) {
   const startTime = Date.now();
 
   console.log('Waiting for URL to change to /imagine/post/{UUID}...');
@@ -761,6 +778,7 @@ async function waitForImagePageLoad(timeout = 30000) {
 // Find "Make a video" textarea on image page
 async function findMakeVideoTextarea(maxAttempts = 30) {
   console.log('Searching for "Make a video" textarea...');
+  await waitForDocumentComplete();
 
   for (let i = 0; i < maxAttempts; i++) {
     console.log(`Attempt ${i + 1}/${maxAttempts}...`);
@@ -798,6 +816,388 @@ function updateStatus(status) {
     type: 'UPDATE_STATUS',
     status: status
   });
+}
+
+// Placeholder chat/vision job flow.
+// This should be replaced with real Grok chat automation once selectors are finalized.
+async function processChatJob(job) {
+  console.log('=== Starting chat job processing (placeholder) ===');
+  console.log('Job ID:', job.job_id);
+  console.log('Chat request payload:', job.request);
+  console.log('Received job.chatConfig:', job.chatConfig || null);
+  const chatTiming = getChatTimingConfig(job);
+  console.log('Resolved chat timing config:', chatTiming);
+
+  try {
+    updateStatus('Initializing chat...');
+    await sleep(500);
+
+    updateStatus('Navigating to grok.com...');
+    await ensureOnGrokChatHome();
+    await waitForDocumentComplete();
+
+    updateStatus('Waiting for attach button...');
+    const attachButton = await findAttachButton(30);
+    if (!attachButton) {
+      throw new Error('Attach button not found on https://grok.com/');
+    }
+    console.log('✓ Attach button detected on chat page');
+
+    const { images, contextText } = await extractChatInputsFromRequest(job.request);
+    console.log(`Extracted ${images.length} image(s) from request`);
+    console.log('Context text length:', contextText.length);
+
+    if (images.length > 0) {
+      updateStatus(`Uploading ${images.length} image(s)...`);
+      for (let i = 0; i < images.length; i++) {
+        console.log(`Uploading image ${i + 1}/${images.length}...`);
+        await uploadImageToGrok(images[i]);
+        // Wait for image to upload and page to update before next upload
+        await sleep(chatTiming.imageUploadDelayMs);
+      }
+      console.log('✓ All request images uploaded');
+    }
+
+    if (contextText) {
+      updateStatus('Entering context text...');
+      await waitForDocumentComplete();
+      const contextInput = await findChatContextInput();
+      if (!contextInput) {
+        throw new Error('Chat context input not found');
+      }
+      await insertTextFast(contextInput, contextText);
+      console.log('✓ Context text entered');
+    }
+
+    updateStatus('Submitting chat request...');
+    await waitForDocumentComplete();
+    const submitButton = await findChatSubmitButton();
+    if (!submitButton) {
+      throw new Error('Chat submit button not found');
+    }
+    await simulateClick(submitButton);
+    console.log('✓ Chat submit button clicked');
+    await sleep(1200);
+
+    updateStatus('Waiting for model response to finish...');
+    await waitForDocumentComplete();
+    const modelFinished = await waitForStopModelResponseInactive();
+    if (!modelFinished) {
+      throw new Error('Model response did not finish in time');
+    }
+    await sleep(1000);
+
+    updateStatus('Waiting for response...');
+    await waitForDocumentComplete();
+    const responseText = await waitForChatResponseMarkdownText();
+    if (!responseText || responseText.trim().length === 0) {
+      throw new Error('Response markdown text is empty');
+    }
+    await waitForDocumentComplete();
+
+    updateStatus('Extracting response text...');
+    console.log('✓ Extracted response raw length:', responseText.length);
+    console.log('✓ Extracted response trimmed length:', responseText.trim().length);
+    
+    chrome.runtime.sendMessage({
+      type: 'JOB_CHAT_COMPLETED',
+      jobId: job.job_id,
+      content: responseText
+    });
+
+    updateStatus('Completed!');
+    await sleep(300);
+    console.log('=== Chat job completed ===');
+    refreshGrokChatHomeIfNeeded();
+  } catch (error) {
+    console.error('=== Chat job processing failed ===', error);
+    chrome.runtime.sendMessage({
+      type: 'JOB_FAILED',
+      jobId: job.job_id,
+      error: `Chat processing failed: ${error.message}`
+    });
+  }
+}
+
+async function ensureOnGrokChatHome() {
+  const targetUrl = 'https://grok.com/';
+  const currentUrl = window.location.href;
+
+  if (currentUrl === targetUrl || currentUrl === 'https://grok.com') {
+    console.log('✓ Already on grok.com home');
+    return;
+  }
+  throw new Error(`Not on ${targetUrl}. Current URL: ${currentUrl}`);
+}
+
+async function extractChatInputsFromRequest(request) {
+  const result = {
+    images: [],
+    contextText: ''
+  };
+
+  if (!request || !Array.isArray(request.messages)) {
+    return result;
+  }
+
+  const textParts = [];
+  const imageEntries = [];
+
+  for (const message of request.messages) {
+    if (!message || message.role !== 'user') {
+      continue;
+    }
+
+    const content = message.content;
+    if (typeof content === 'string') {
+      if (content.trim()) textParts.push(content.trim());
+      continue;
+    }
+
+    if (!Array.isArray(content)) {
+      continue;
+    }
+
+    for (const part of content) {
+      if (!part || typeof part !== 'object') {
+        continue;
+      }
+
+      if (part.type === 'text' && part.text) {
+        textParts.push(String(part.text).trim());
+      }
+
+      if (part.type === 'image_url') {
+        if (typeof part.image_url === 'string') {
+          imageEntries.push(part.image_url);
+        } else if (part.image_url && typeof part.image_url.url === 'string') {
+          imageEntries.push(part.image_url.url);
+        }
+      }
+
+      if (part.type === 'input_image' && part.image_url && typeof part.image_url === 'string') {
+        imageEntries.push(part.image_url);
+      }
+    }
+  }
+
+  const uniqueImages = [...new Set(imageEntries.filter(Boolean))];
+  for (const imageUrl of uniqueImages) {
+    const dataUrl = await imageUrlToDataUrl(imageUrl);
+    result.images.push(dataUrl);
+  }
+
+  result.contextText = textParts.filter(Boolean).join('\n\n').trim();
+  return result;
+}
+
+async function imageUrlToDataUrl(imageUrl) {
+  if (imageUrl.startsWith('data:image/')) {
+    return imageUrl;
+  }
+
+  if (!imageUrl.startsWith('http://') && !imageUrl.startsWith('https://')) {
+    throw new Error(`Unsupported image URL format: ${imageUrl.substring(0, 60)}`);
+  }
+
+  const response = await fetch(imageUrl, {
+    method: 'GET',
+    credentials: 'include',
+    mode: 'cors'
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to fetch image URL: ${response.status} ${response.statusText}`);
+  }
+
+  const blob = await response.blob();
+  return await blobToDataUrl(blob);
+}
+
+function blobToDataUrl(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const value = reader.result;
+      if (typeof value === 'string') {
+        resolve(value);
+      } else {
+        reject(new Error('Failed to convert blob to data URL'));
+      }
+    };
+    reader.onerror = () => reject(new Error('Failed to read blob as data URL'));
+    reader.readAsDataURL(blob);
+  });
+}
+
+async function findChatContextInput(maxAttempts = 30) {
+  console.log('Searching for chat context input...');
+  await waitForDocumentComplete();
+
+  for (let i = 0; i < maxAttempts; i++) {
+    const selectors = [
+      'div.tiptap.ProseMirror[contenteditable="true"]',
+      'div[contenteditable="true"] .is-editor-empty[data-placeholder*="What do you want to know"]',
+      'div[contenteditable="true"][tabindex="0"]'
+    ];
+
+    for (const selector of selectors) {
+      const element = document.querySelector(selector);
+      if (!element) {
+        continue;
+      }
+
+      const target = element.closest('div[contenteditable="true"]') || element;
+      if (target && target.offsetParent !== null) {
+        console.log('✓ Found chat input with selector:', selector);
+        return target;
+      }
+    }
+
+    await sleep(500);
+  }
+
+  return null;
+}
+
+async function findChatSubmitButton(maxAttempts = 30) {
+  console.log('Searching for chat submit button...');
+  await waitForDocumentComplete();
+
+  for (let i = 0; i < maxAttempts; i++) {
+    const selectors = [
+      'button[type="submit"][aria-label="Submit"]',
+      'button[aria-label="Submit"]',
+      'button[type="submit"]'
+    ];
+
+    for (const selector of selectors) {
+      const elements = document.querySelectorAll(selector);
+      for (const element of elements) {
+        if (element.offsetParent !== null && !element.disabled) {
+          console.log('✓ Found chat submit button with selector:', selector);
+          return element;
+        }
+      }
+    }
+
+    await sleep(300);
+  }
+
+  return null;
+}
+
+async function waitForChatResponseMarkdownText(maxAttempts = 120) {
+  console.log('Waiting for response-content-markdown text...');
+  await waitForDocumentComplete();
+
+  for (let i = 0; i < maxAttempts; i++) {
+    const text = extractLatestChatResponseMarkdownText();
+    if (text && text.trim().length > 0) {
+      console.log('✓ Found non-empty response-content-markdown text');
+      return text;
+    }
+
+    await sleep(500);
+  }
+
+  return '';
+}
+
+async function waitForStopModelResponseInactive(maxAttempts = 240) {
+  console.log('Waiting for "Stop model response" button to become inactive...');
+  await waitForDocumentComplete();
+
+  for (let i = 0; i < maxAttempts; i++) {
+    const stopButtons = Array.from(document.querySelectorAll('button[aria-label="Stop model response"]'));
+    const activeStopButton = stopButtons.find(btn => btn.offsetParent !== null && !btn.disabled);
+
+    if (!activeStopButton) {
+      console.log('✓ Stop model response button is not active');
+      return true;
+    }
+
+    await sleep(500);
+  }
+
+  return false;
+}
+
+function extractLatestChatResponseMarkdownText() {
+  const containers = Array.from(document.querySelectorAll('div.response-content-markdown.markdown'));
+  const visibleContainers = containers.filter(el => el.offsetParent !== null);
+  const candidates = visibleContainers.length > 0 ? visibleContainers : containers;
+
+  if (candidates.length === 0) {
+    return '';
+  }
+
+  const last = candidates[candidates.length - 1];
+  const text = (last.innerText || last.textContent || '').trim();
+  return text;
+}
+
+function refreshGrokChatHomeIfNeeded() {
+  const targetUrl = 'https://grok.com/';
+  const currentUrl = window.location.href;
+
+  if (currentUrl !== targetUrl && currentUrl !== 'https://grok.com') {
+    window.location.href = targetUrl;
+  } else {
+    console.log('Already on grok.com home page, skipping refresh navigation');
+  }
+}
+
+async function waitForDocumentComplete(timeoutMs = 30000) {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    if (document.readyState === 'complete') {
+      return true;
+    }
+    await sleep(200);
+  }
+
+  console.warn(`Document did not reach readyState=complete within ${timeoutMs}ms, continuing anyway.`);
+  return false;
+}
+
+async function getChatTimingConfig(job) {
+  const chatConfig = job?.chatConfig || {};
+  const imageUploadDelayMs = Number(chatConfig.imageUploadDelayMs || 5000);
+
+  return {
+    imageUploadDelayMs: Number.isFinite(imageUploadDelayMs) && imageUploadDelayMs >= 0 ? imageUploadDelayMs : 5000
+  };
+}
+
+// Prepare page state for next job
+async function prepareVideoForNextUse() {
+  const targetUrl = 'https://grok.com/imagine';
+  const currentUrl = window.location.href;
+
+  console.log('Preparing for next use...');
+  console.log('Current URL before cleanup:', currentUrl);
+  updateStatus('Preparing for next job...');
+
+  if (currentUrl === targetUrl || currentUrl === `${targetUrl}/`) {
+    console.log('✓ Already on main imagine page');
+    return;
+  }
+
+  try {
+    // First try UI navigation (faster and less disruptive than full reload).
+    await navigateToVideoImaginePage();
+  } catch (error) {
+    console.warn('UI navigation to imagine page failed, using direct URL navigation:', error.message);
+  }
+
+  const finalUrl = window.location.href;
+  if (finalUrl !== targetUrl && finalUrl !== `${targetUrl}/`) {
+    console.log('Navigating directly to main imagine page:', targetUrl);
+    window.location.href = targetUrl;
+  } else {
+    console.log('✓ Prepared for next job on main imagine page');
+  }
 }
 
 // Sleep utility

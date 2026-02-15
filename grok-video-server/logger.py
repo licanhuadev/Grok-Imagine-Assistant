@@ -79,6 +79,17 @@ class StructuredLogger:
         except Exception as e:
             print(f"Failed to write log: {e}")
 
+    def clear_logs(self) -> int:
+        """Delete all structured log files and return deleted count"""
+        deleted = 0
+        try:
+            for file_path in self.log_dir.glob("requests_*.jsonl"):
+                file_path.unlink(missing_ok=True)
+                deleted += 1
+        except Exception as e:
+            print(f"Failed to clear logs: {e}")
+        return deleted
+
 
 # Global logger instance
 logger = StructuredLogger()
