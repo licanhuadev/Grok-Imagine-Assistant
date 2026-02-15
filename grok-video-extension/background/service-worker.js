@@ -5,18 +5,48 @@ let POLL_INTERVAL = 10000; // 10 seconds
 let VIDEO_TIMEOUT_SECONDS = 300; // 5 minutes
 let CHAT_TIMEOUT_SECONDS = 60; // 1 minute
 let CHAT_IMAGE_UPLOAD_DELAY_MS = 5000;
+let CLIENT_ID = null;
 
 let pollingInterval = null;
 let chatPollingEnabled = false;
 let videoPollingEnabled = false;
 const cancelledJobIds = new Set();
+let panelOpen = false;
 
 async function initializeRuntimeState() {
+  await loadOrCreateClientId();
   await loadConfig();
   await loadPollingState();
-  if (isAnyPollingEnabled() && !pollingInterval) {
+  if (panelOpen && isAnyPollingEnabled() && !pollingInterval) {
     startPollingLoop();
   }
+}
+
+function generateClientId() {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let seed = Date.now();
+  let id = '';
+
+  for (let i = 0; i < 5; i++) {
+    const idx = seed % chars.length;
+    id = chars[idx] + id;
+    seed = Math.floor(seed / chars.length);
+  }
+
+  return id.padStart(5, 'A').slice(-5);
+}
+
+async function loadOrCreateClientId() {
+  const { clientId } = await chrome.storage.local.get('clientId');
+  if (typeof clientId === 'string' && clientId.length === 5) {
+    CLIENT_ID = clientId;
+    return CLIENT_ID;
+  }
+
+  CLIENT_ID = generateClientId();
+  await chrome.storage.local.set({ clientId: CLIENT_ID });
+  console.log('Generated new client ID:', CLIENT_ID);
+  return CLIENT_ID;
 }
 
 // Load configuration from config.json
@@ -65,6 +95,7 @@ function isAnyPollingEnabled() {
 chrome.runtime.onInstalled.addListener(async () => {
   console.log('Grok Imagine Assistant installed');
 
+  await loadOrCreateClientId();
   await loadConfig();
 
   const { stats } = await chrome.storage.local.get('stats');
@@ -86,6 +117,7 @@ chrome.runtime.onInstalled.addListener(async () => {
 // Start polling on startup
 chrome.runtime.onStartup.addListener(async () => {
   console.log('Extension started');
+  await loadOrCreateClientId();
   await loadConfig();
   await loadPollingState();
 
@@ -102,6 +134,11 @@ chrome.action.onClicked.addListener(async (tab) => {
 initializeRuntimeState();
 
 function startPollingLoop() {
+  if (!panelOpen) {
+    console.log('Polling loop not started: side panel is closed');
+    return;
+  }
+
   if (pollingInterval) {
     clearInterval(pollingInterval);
   }
@@ -112,15 +149,19 @@ function startPollingLoop() {
 }
 
 function stopPollingLoopIfIdle() {
-  if (!isAnyPollingEnabled() && pollingInterval) {
+  if ((!isAnyPollingEnabled() || !panelOpen) && pollingInterval) {
     clearInterval(pollingInterval);
     pollingInterval = null;
-    console.log('Polling loop stopped (all modes disabled)');
+    console.log('Polling loop stopped');
   }
 }
 
 async function setChatPolling(enabled) {
   chatPollingEnabled = enabled;
+  if (enabled) {
+    // Enforce single-mode worker behavior per client.
+    videoPollingEnabled = false;
+  }
   if (!enabled) {
     await cancelCurrentJobForMode('chat');
   }
@@ -134,6 +175,10 @@ async function setChatPolling(enabled) {
 
 async function setVideoPolling(enabled) {
   videoPollingEnabled = enabled;
+  if (enabled) {
+    // Enforce single-mode worker behavior per client.
+    chatPollingEnabled = false;
+  }
   if (!enabled) {
     await cancelCurrentJobForMode('video');
   }
@@ -190,7 +235,8 @@ async function ensureContentScriptReady(tabId, maxRetries = 5) {
 }
 
 async function pollServerForMode(mode) {
-  const response = await fetch(`${SERVER_URL}/extension/poll?mode=${mode}`);
+  console.log(`[extension/poll] request client=${CLIENT_ID} mode=${mode}`);
+  const response = await fetch(`${SERVER_URL}/extension/poll?mode=${mode}&client_id=${encodeURIComponent(CLIENT_ID)}`);
 
   if (response.status === 204) {
     return null;
@@ -216,6 +262,10 @@ async function waitForTabComplete(tabId, timeoutMs = 20000) {
   return false;
 }
 
+function isImagineUrl(url) {
+  return typeof url === 'string' && url.includes('https://grok.com/imagine');
+}
+
 async function getTargetGrokTabForJob(jobType) {
   if (jobType === 'chat') {
     const tabs = await chrome.tabs.query({ url: 'https://grok.com/*' });
@@ -235,16 +285,45 @@ async function getTargetGrokTabForJob(jobType) {
     return tab.id;
   }
 
-  const tabs = await chrome.tabs.query({ url: 'https://grok.com/imagine*' });
-  if (tabs.length === 0) {
+  // Video mode: use broader Grok tab detection to handle pending loads/redirects.
+  const grokTabs = await chrome.tabs.query({ url: 'https://grok.com/*' });
+  if (grokTabs.length === 0) {
     throw new Error('No Grok tab open. Please open https://grok.com/imagine in a tab.');
   }
-  return tabs[0].id;
+
+  const imagineTab = grokTabs.find(tab => isImagineUrl(tab.url) || isImagineUrl(tab.pendingUrl));
+  if (imagineTab) {
+    return imagineTab.id;
+  }
+
+  console.warn('No imagine tab detected from current Grok tabs. Seen tabs:', grokTabs.map(t => ({
+    id: t.id,
+    url: t.url,
+    pendingUrl: t.pendingUrl
+  })));
+
+  // Fallback: repurpose an existing Grok tab to imagine.
+  const tab = grokTabs[0];
+  const targetUrl = 'https://grok.com/imagine';
+  await chrome.tabs.update(tab.id, { url: targetUrl });
+  const loaded = await waitForTabComplete(tab.id);
+  if (!loaded) {
+    throw new Error('Timed out waiting for https://grok.com/imagine to load.');
+  }
+  return tab.id;
 }
 
 // Poll server for jobs
 async function pollServer() {
   try {
+    if (!panelOpen) {
+      return;
+    }
+
+    if (!CLIENT_ID) {
+      await loadOrCreateClientId();
+    }
+
     if (!isAnyPollingEnabled()) {
       return;
     }
@@ -281,10 +360,12 @@ async function pollServer() {
     if (!job) {
       return;
     }
+    console.log(`[extension/poll] client=${CLIENT_ID} mode=${job.job_type} job=${job.job_id}`);
 
     await chrome.storage.local.set({
       currentJob: {
         jobId: job.job_id,
+        clientId: job.client_id || CLIENT_ID,
         prompt: job.prompt,
         image: job.image,
         mode: job.job_type || 'video',
@@ -382,7 +463,17 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   } else if (message.type === 'STOP_VIDEO_POLLING') {
     setVideoPolling(false).then(() => sendResponse({ success: true, chatPollingEnabled, videoPollingEnabled }));
   } else if (message.type === 'GET_POLLING_STATE') {
-    sendResponse({ chatPollingEnabled, videoPollingEnabled });
+    sendResponse({ chatPollingEnabled, videoPollingEnabled, clientId: CLIENT_ID, panelOpen });
+  } else if (message.type === 'PANEL_OPEN') {
+    panelOpen = true;
+    if (isAnyPollingEnabled()) {
+      startPollingLoop();
+    }
+    sendResponse({ success: true, panelOpen });
+  } else if (message.type === 'PANEL_CLOSED') {
+    panelOpen = false;
+    stopPollingLoopIfIdle();
+    sendResponse({ success: true, panelOpen });
   }
   return true;
 });
@@ -416,6 +507,7 @@ async function handleVideoJobCompleted(jobId, videoBlob) {
 
     history.unshift({
       jobId: jobId,
+      clientId: currentJob?.clientId || CLIENT_ID,
       mode: 'video',
       prompt: currentJob?.prompt || '',
       videoUrl: `${SERVER_URL}/videos/${jobId}.mp4`,
@@ -464,6 +556,7 @@ async function handleChatJobCompleted(jobId, content) {
 
     history.unshift({
       jobId: jobId,
+      clientId: currentJob?.clientId || CLIENT_ID,
       mode: 'chat',
       prompt: currentJob?.prompt || '',
       textResponse: content,
@@ -499,6 +592,7 @@ async function handleJobFailed(jobId, error) {
 
   history.unshift({
     jobId: jobId,
+    clientId: currentJob?.clientId || CLIENT_ID,
     mode: currentJob?.mode || 'video',
     prompt: currentJob?.prompt || '',
     status: 'failed',

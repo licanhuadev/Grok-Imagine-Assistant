@@ -5,6 +5,7 @@ const SERVER_URL = 'http://localhost:8000';
 let connectionStatus;
 let currentJobSection;
 let currentJobId;
+let currentJobClient;
 let currentJobMode;
 let currentJobPrompt;
 let currentJobStatus;
@@ -12,18 +13,19 @@ let progressFill;
 let totalCompleted;
 let totalFailed;
 let historyList;
-let startChatBtn;
-let stopChatBtn;
-let startVideoBtn;
-let stopVideoBtn;
+let toggleChatBtn;
+let toggleVideoBtn;
 let chatWorkerStatus;
 let videoWorkerStatus;
 let cleanHistoryBtn;
 
 document.addEventListener('DOMContentLoaded', async () => {
+  await chrome.runtime.sendMessage({ type: 'PANEL_OPEN' });
+
   connectionStatus = document.getElementById('connectionStatus');
   currentJobSection = document.getElementById('currentJobSection');
   currentJobId = document.getElementById('currentJobId');
+  currentJobClient = document.getElementById('currentJobClient');
   currentJobMode = document.getElementById('currentJobMode');
   currentJobPrompt = document.getElementById('currentJobPrompt');
   currentJobStatus = document.getElementById('currentJobStatus');
@@ -31,20 +33,16 @@ document.addEventListener('DOMContentLoaded', async () => {
   totalCompleted = document.getElementById('totalCompleted');
   totalFailed = document.getElementById('totalFailed');
   historyList = document.getElementById('historyList');
-  startChatBtn = document.getElementById('startChatBtn');
-  stopChatBtn = document.getElementById('stopChatBtn');
-  startVideoBtn = document.getElementById('startVideoBtn');
-  stopVideoBtn = document.getElementById('stopVideoBtn');
+  toggleChatBtn = document.getElementById('toggleChatBtn');
+  toggleVideoBtn = document.getElementById('toggleVideoBtn');
   chatWorkerStatus = document.getElementById('chatWorkerStatus');
   videoWorkerStatus = document.getElementById('videoWorkerStatus');
   cleanHistoryBtn = document.getElementById('cleanHistoryBtn');
 
   await loadData();
 
-  startChatBtn.addEventListener('click', startChatWorker);
-  stopChatBtn.addEventListener('click', stopChatWorker);
-  startVideoBtn.addEventListener('click', startVideoWorker);
-  stopVideoBtn.addEventListener('click', stopVideoWorker);
+  toggleChatBtn.addEventListener('click', toggleChatWorker);
+  toggleVideoBtn.addEventListener('click', toggleVideoWorker);
   cleanHistoryBtn.addEventListener('click', cleanHistory);
 
   await updateWorkerStatus();
@@ -59,6 +57,11 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   checkServerConnection();
   setInterval(checkServerConnection, 10000);
+});
+
+window.addEventListener('beforeunload', () => {
+  // Fire-and-forget: side panel closing should stop polling.
+  chrome.runtime.sendMessage({ type: 'PANEL_CLOSED' }).catch(() => {});
 });
 
 async function loadData() {
@@ -82,18 +85,21 @@ async function loadData() {
 }
 
 async function checkServerConnection() {
+  const { clientId } = await chrome.storage.local.get('clientId');
+  const clientSuffix = clientId ? ` · Client ${clientId}` : '';
+
   try {
     const response = await fetch(`${SERVER_URL}/`, { method: 'GET' });
     if (response.ok) {
       connectionStatus.className = 'status-indicator connected';
-      connectionStatus.querySelector('.status-text').textContent = 'Connected';
+      connectionStatus.querySelector('.status-text').textContent = `Connected${clientSuffix}`;
     } else {
       connectionStatus.className = 'status-indicator disconnected';
-      connectionStatus.querySelector('.status-text').textContent = 'Server Error';
+      connectionStatus.querySelector('.status-text').textContent = `Server Error${clientSuffix}`;
     }
   } catch (error) {
     connectionStatus.className = 'status-indicator disconnected';
-    connectionStatus.querySelector('.status-text').textContent = 'Disconnected';
+    connectionStatus.querySelector('.status-text').textContent = `Disconnected${clientSuffix}`;
   }
 }
 
@@ -101,6 +107,7 @@ function showCurrentJob(job) {
   currentJobSection.style.display = 'block';
 
   currentJobId.textContent = job.jobId || 'N/A';
+  currentJobClient.textContent = `Client: ${job.clientId || '-----'}`;
   currentJobMode.textContent = `Mode: ${(job.mode || 'video').toUpperCase()}`;
   currentJobPrompt.textContent = job.prompt || 'No prompt';
   currentJobStatus.textContent = job.progressStatus || job.status || 'Processing...';
@@ -141,6 +148,7 @@ function renderHistory(history) {
     <thead>
       <tr>
         <th>Time</th>
+        <th>Client</th>
         <th>Mode</th>
         <th>Status</th>
         <th>Job ID</th>
@@ -163,6 +171,7 @@ function renderHistory(history) {
 
     row.innerHTML = `
       <td class="history-time">${formatDetailedTime(item.completedAt || item.failedAt)}</td>
+      <td>${item.clientId || '-----'}</td>
       <td>${mode}</td>
       <td><span class="status-badge ${statusClass}">${status === 'completed' ? '✓ Pass' : '✗ Fail'}</span></td>
       <td class="history-job-link">${idCell}</td>
@@ -184,23 +193,17 @@ function formatDetailedTime(timestamp) {
   return `${day}/${hours}:${minutes}`;
 }
 
-async function startChatWorker() {
-  const response = await chrome.runtime.sendMessage({ type: 'START_CHAT_POLLING' });
+async function toggleChatWorker() {
+  const state = await chrome.runtime.sendMessage({ type: 'GET_POLLING_STATE' });
+  const nextMessageType = state?.chatPollingEnabled ? 'STOP_CHAT_POLLING' : 'START_CHAT_POLLING';
+  const response = await chrome.runtime.sendMessage({ type: nextMessageType });
   if (response?.success) await updateWorkerStatus();
 }
 
-async function stopChatWorker() {
-  const response = await chrome.runtime.sendMessage({ type: 'STOP_CHAT_POLLING' });
-  if (response?.success) await updateWorkerStatus();
-}
-
-async function startVideoWorker() {
-  const response = await chrome.runtime.sendMessage({ type: 'START_VIDEO_POLLING' });
-  if (response?.success) await updateWorkerStatus();
-}
-
-async function stopVideoWorker() {
-  const response = await chrome.runtime.sendMessage({ type: 'STOP_VIDEO_POLLING' });
+async function toggleVideoWorker() {
+  const state = await chrome.runtime.sendMessage({ type: 'GET_POLLING_STATE' });
+  const nextMessageType = state?.videoPollingEnabled ? 'STOP_VIDEO_POLLING' : 'START_VIDEO_POLLING';
+  const response = await chrome.runtime.sendMessage({ type: nextMessageType });
   if (response?.success) await updateWorkerStatus();
 }
 
@@ -210,36 +213,40 @@ async function updateWorkerStatus() {
   const isVideoOn = !!response?.videoPollingEnabled;
 
   if (isChatOn) {
-    chatWorkerStatus.textContent = '✓ Chat worker is running';
-    chatWorkerStatus.className = 'worker-status active';
+    chatWorkerStatus.textContent = '✓ running';
+    chatWorkerStatus.className = 'worker-status-inline active';
+    toggleChatBtn.textContent = '⏸ Stop Chat';
+    toggleChatBtn.className = 'btn btn-secondary';
   } else {
-    chatWorkerStatus.textContent = '⏸ Chat worker is stopped';
-    chatWorkerStatus.className = 'worker-status stopped';
+    chatWorkerStatus.textContent = '⏸ stopped';
+    chatWorkerStatus.className = 'worker-status-inline stopped';
+    toggleChatBtn.textContent = '▶ Start Chat';
+    toggleChatBtn.className = 'btn btn-primary';
   }
 
   if (isVideoOn) {
-    videoWorkerStatus.textContent = '✓ Video worker is running';
-    videoWorkerStatus.className = 'worker-status active';
+    videoWorkerStatus.textContent = '✓ running';
+    videoWorkerStatus.className = 'worker-status-inline active';
+    toggleVideoBtn.textContent = '⏸ Stop Video';
+    toggleVideoBtn.className = 'btn btn-secondary';
   } else {
-    videoWorkerStatus.textContent = '⏸ Video worker is stopped';
-    videoWorkerStatus.className = 'worker-status stopped';
+    videoWorkerStatus.textContent = '⏸ stopped';
+    videoWorkerStatus.className = 'worker-status-inline stopped';
+    toggleVideoBtn.textContent = '▶ Start Video';
+    toggleVideoBtn.className = 'btn btn-primary';
   }
-
-  startChatBtn.disabled = isChatOn;
-  stopChatBtn.disabled = !isChatOn;
-  startVideoBtn.disabled = isVideoOn;
-  stopVideoBtn.disabled = !isVideoOn;
-
-  startChatBtn.style.opacity = isChatOn ? '0.5' : '1';
-  stopChatBtn.style.opacity = isChatOn ? '1' : '0.5';
-  startVideoBtn.style.opacity = isVideoOn ? '0.5' : '1';
-  stopVideoBtn.style.opacity = isVideoOn ? '1' : '0.5';
 }
 
 async function cleanHistory() {
-  const confirmed = confirm('Clear extension history?');
+  const confirmed = confirm('Clear extension history and reset statistics?');
   if (!confirmed) return;
 
-  await chrome.storage.local.set({ history: [] });
+  await chrome.storage.local.set({
+    history: [],
+    stats: {
+      totalCompleted: 0,
+      totalFailed: 0
+    }
+  });
   await loadData();
 }

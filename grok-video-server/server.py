@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, UploadFile, File, Form
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Query
 from fastapi.responses import FileResponse, Response, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -220,7 +220,10 @@ async def get_video_generation(job_id: str):
 
 
 @app.get("/extension/poll")
-async def extension_poll(mode: JobType = JobType.VIDEO):
+async def extension_poll(
+    mode: JobType = JobType.VIDEO,
+    client_id: str = Query(..., min_length=5, max_length=5)
+):
     """
     Extension polls for next job to process
     Returns 204 if no jobs available, otherwise returns job details
@@ -228,14 +231,15 @@ async def extension_poll(mode: JobType = JobType.VIDEO):
     # Cleanup stale jobs
     await job_queue.cleanup_stale_jobs()
 
-    # Get next pending job by mode
-    job = await job_queue.get_next_pending_job(job_type=mode.value)
+    # Validate client_id as readable ASCII
+    if not all(32 <= ord(c) <= 126 for c in client_id):
+        raise HTTPException(status_code=400, detail="client_id must be 5 printable ASCII characters")
+
+    # Atomically claim next pending job by mode for this client
+    job = await job_queue.claim_next_pending_job(job_type=mode.value, client_id=client_id)
 
     if not job:
         return Response(status_code=204)
-
-    # Mark job as processing
-    await job_queue.update_job_status(job.job_id, JobStatus.PROCESSING)
 
     # Return job details
     parsed_request = None
@@ -248,6 +252,7 @@ async def extension_poll(mode: JobType = JobType.VIDEO):
     response = ExtensionPollResponse(
         job_id=job.job_id,
         job_type=job.job_type,
+        client_id=job.client_id or client_id,
         prompt=job.prompt,
         image=job.image,
         request=parsed_request
@@ -255,8 +260,9 @@ async def extension_poll(mode: JobType = JobType.VIDEO):
 
     logger.log_request(
         method="GET",
-        path=f"/extension/poll?mode={mode.value}",
-        job_id=job.job_id
+        path=f"/extension/poll?mode={mode.value}&client_id={client_id}",
+        job_id=job.job_id,
+        payload={"client_id": client_id}
     )
 
     return response

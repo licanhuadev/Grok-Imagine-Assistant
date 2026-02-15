@@ -34,6 +34,7 @@ class VideoGenerationResponse(BaseModel):
 class ExtensionPollResponse(BaseModel):
     job_id: str = Field(..., description="Job ID to process")
     job_type: JobType = Field(..., description="Type of job for extension worker")
+    client_id: str = Field(..., description="Worker client ID that claimed the job")
     prompt: str = Field(..., description="Prompt for job processing")
     image: Optional[str] = Field(None, description="Base64 encoded image or null")
     request: Optional[Dict[str, Any]] = Field(None, description="Raw OpenAI-style request for chat jobs")

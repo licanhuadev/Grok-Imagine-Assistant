@@ -111,6 +111,25 @@ body {
   color: #721c24;
 }
 
+.worker-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.worker-status-inline {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.worker-status-inline.active {
+  color: #155724;
+}
+
+.worker-status-inline.stopped {
+  color: #721c24;
+}
+
 /* Input Group */
 .input-group {
   display: flex;

@@ -499,6 +499,7 @@
                         <thead>
                             <tr>
                                 <th>Job ID</th>
+                                <th>Client</th>
                                 <th>Prompt</th>
                                 <th>Status</th>
                                 <th>Created</th>
@@ -509,6 +510,7 @@
                             ${jobs.map(job => `
                                 <tr>
                                     <td><code>${job.job_id}</code></td>
+                                    <td><code>${job.client_id || '-'}</code></td>
                                     <td>${job.prompt.substring(0, 60)}${job.prompt.length > 60 ? '...' : ''}</td>
                                     <td><span class="status-badge status-${job.status}">${job.status}</span></td>
                                     <td>${new Date(job.created_at * 1000).toLocaleString()}</td>

@@ -20,29 +20,21 @@
     <!-- Worker Controls -->
     <section class="section">
       <h2>Worker Control</h2>
-      <div style="font-size: 12px; color: #666; margin-bottom: 8px;">Chat Worker</div>
-      <div class="worker-controls">
-        <button id="startChatBtn" class="btn btn-primary" style="flex: 1;">
+      <div class="worker-row">
+        <button id="toggleChatBtn" class="btn btn-primary">
           ▶ Start Chat
         </button>
-        <button id="stopChatBtn" class="btn btn-secondary" style="flex: 1;">
-          ⏸ Stop Chat
-        </button>
+        <div id="chatWorkerStatus" class="worker-status-inline">
+          Chat stopped
+        </div>
       </div>
-      <div id="chatWorkerStatus" class="worker-status">
-        Chat worker is stopped
-      </div>
-      <div style="font-size: 12px; color: #666; margin: 12px 0 8px;">Video Worker</div>
-      <div class="worker-controls">
-        <button id="startVideoBtn" class="btn btn-primary" style="flex: 1;">
+      <div class="worker-row" style="margin-top: 10px;">
+        <button id="toggleVideoBtn" class="btn btn-primary">
           ▶ Start Video
         </button>
-        <button id="stopVideoBtn" class="btn btn-secondary" style="flex: 1;">
-          ⏸ Stop Video
-        </button>
-      </div>
-      <div id="videoWorkerStatus" class="worker-status">
-        Video worker is stopped
+        <div id="videoWorkerStatus" class="worker-status-inline">
+          Video stopped
+        </div>
       </div>
     </section>
 
@@ -51,6 +43,7 @@
       <h2>Current Job</h2>
       <div class="job-card">
         <div class="job-id" id="currentJobId">job_123abc</div>
+        <div class="job-id" id="currentJobClient">Client: -----</div>
         <div class="job-id" id="currentJobMode">Mode: video</div>
         <div class="job-prompt" id="currentJobPrompt">Generating video...</div>
         <div class="job-status" id="currentJobStatus">Waiting...</div>

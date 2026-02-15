@@ -10,6 +10,7 @@ import config
 class Job:
     def __init__(self, job_id: str, prompt: str, image: Optional[str] = None,
                  status: str = JobStatus.PENDING, job_type: str = JobType.VIDEO,
+                 client_id: Optional[str] = None,
                  request_payload: Optional[str] = None, text_response: Optional[str] = None,
                  created_at: int = None,
                  completed_at: Optional[int] = None, video_path: Optional[str] = None,
@@ -19,6 +20,7 @@ class Job:
         self.image = image
         self.status = status
         self.job_type = job_type.value if isinstance(job_type, JobType) else job_type
+        self.client_id = client_id
         self.request_payload = request_payload
         self.text_response = text_response
         self.created_at = created_at or int(datetime.now().timestamp())
@@ -33,6 +35,7 @@ class Job:
             'image': self.image,
             'status': self.status,
             'job_type': self.job_type,
+            'client_id': self.client_id,
             'request_payload': json.loads(self.request_payload) if self.request_payload else None,
             'text_response': self.text_response,
             'created_at': self.created_at,
@@ -56,6 +59,7 @@ class JobQueue:
                     image TEXT,
                     status TEXT NOT NULL,
                     job_type TEXT NOT NULL DEFAULT 'video',
+                    client_id TEXT,
                     request_payload TEXT,
                     text_response TEXT,
                     created_at INTEGER NOT NULL,
@@ -70,6 +74,8 @@ class JobQueue:
 
             if 'job_type' not in columns:
                 await db.execute("ALTER TABLE jobs ADD COLUMN job_type TEXT NOT NULL DEFAULT 'video'")
+            if 'client_id' not in columns:
+                await db.execute("ALTER TABLE jobs ADD COLUMN client_id TEXT")
             if 'request_payload' not in columns:
                 await db.execute("ALTER TABLE jobs ADD COLUMN request_payload TEXT")
             if 'text_response' not in columns:
@@ -124,6 +130,7 @@ class JobQueue:
                         image=row['image'],
                         status=row['status'],
                         job_type=row['job_type'],
+                        client_id=row['client_id'],
                         request_payload=row['request_payload'],
                         text_response=row['text_response'],
                         created_at=row['created_at'],
@@ -135,7 +142,7 @@ class JobQueue:
         return None
 
     async def get_next_pending_job(self, job_type: Optional[str] = None) -> Optional[Job]:
-        """Get next pending job from queue"""
+        """Get next pending job from queue (non-claiming read)"""
         async with aiosqlite.connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             if job_type:
@@ -165,6 +172,7 @@ class JobQueue:
                         image=row['image'],
                         status=row['status'],
                         job_type=row['job_type'],
+                        client_id=row['client_id'],
                         request_payload=row['request_payload'],
                         text_response=row['text_response'],
                         created_at=row['created_at'],
@@ -174,6 +182,61 @@ class JobQueue:
                     )
 
         return None
+
+    async def claim_next_pending_job(self, job_type: str, client_id: str) -> Optional[Job]:
+        """Atomically claim next pending job for a worker client"""
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            await db.execute("BEGIN IMMEDIATE")
+
+            async with db.execute("""
+                SELECT job_id
+                FROM jobs
+                WHERE status = ? AND job_type = ?
+                ORDER BY created_at ASC
+                LIMIT 1
+            """, (JobStatus.PENDING, job_type)) as cursor:
+                row = await cursor.fetchone()
+
+            if not row:
+                await db.commit()
+                return None
+
+            job_id = row['job_id']
+            update_cursor = await db.execute("""
+                UPDATE jobs
+                SET status = ?, client_id = ?
+                WHERE job_id = ? AND status = ?
+            """, (JobStatus.PROCESSING, client_id, job_id, JobStatus.PENDING))
+
+            if update_cursor.rowcount != 1:
+                await db.commit()
+                return None
+
+            async with db.execute("""
+                SELECT * FROM jobs WHERE job_id = ?
+            """, (job_id,)) as cursor:
+                claimed = await cursor.fetchone()
+
+            await db.commit()
+
+            if not claimed:
+                return None
+
+            return Job(
+                job_id=claimed['job_id'],
+                prompt=claimed['prompt'],
+                image=claimed['image'],
+                status=claimed['status'],
+                job_type=claimed['job_type'],
+                client_id=claimed['client_id'],
+                request_payload=claimed['request_payload'],
+                text_response=claimed['text_response'],
+                created_at=claimed['created_at'],
+                completed_at=claimed['completed_at'],
+                video_path=claimed['video_path'],
+                error=claimed['error']
+            )
 
     async def update_job_status(self, job_id: str, status: str,
                                video_path: Optional[str] = None,
@@ -213,6 +276,7 @@ class JobQueue:
                     image=row['image'],
                     status=row['status'],
                     job_type=row['job_type'],
+                    client_id=row['client_id'],
                     request_payload=row['request_payload'],
                     text_response=row['text_response'],
                     created_at=row['created_at'],
