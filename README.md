@@ -99,7 +99,7 @@ Your Application polls status
 ## Project Structure
 
 ```
-grok-imagine-loop/
+Grok-Imagine-Assistant/
 ├── grok-video-server/       # Python FastAPI server
 │   ├── server.py            # Main server application
 │   ├── config.py            # Configuration
